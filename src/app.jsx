@@ -49,6 +49,70 @@ const apiStorage = {
   },
 };
 
+// --- Concurrency-safe writes -------------------------------------------------
+// The shared records ("users", "leaderboard:*", "submissions:*", and the group
+// blobs) each hold EVERY user inside one value. Writing back a stale in-memory
+// copy lets one browser erase users it never loaded (last-write-wins data loss).
+// These helpers re-fetch the latest value immediately before writing and merge
+// in only the caller's single change, shrinking the race window from minutes
+// (the age of a loaded tab) to milliseconds (one fetch→write round trip).
+const mergeWrite = async (key, mutate, fallback) => {
+  let current = fallback;
+  try {
+    const r = await apiStorage.get(key);
+    if (r && r.value != null) current = JSON.parse(r.value);
+  } catch (e) { /* key doesn't exist yet → use fallback */ }
+  const next = mutate(current);
+  if (next === undefined || next === null) return current; // guard: never clobber with empty
+  await apiStorage.set(key, JSON.stringify(next));
+  return next;
+};
+
+// Merge a partial update into one user's record (streak, profile fields, groups, joined).
+const mergeUser = (username, partial) =>
+  mergeWrite("users", (o) => ({ ...(o || {}), [username]: { ...((o || {})[username] || {}), ...partial } }), {});
+
+// Atomically claim a brand-new username at registration. Returns {ok:false} if taken.
+const registerUserUnique = async (username, full) => {
+  let taken = false;
+  await mergeWrite("users", (o) => {
+    const base = o || {};
+    if (base[username]) { taken = true; return base; }
+    return { ...base, [username]: full };
+  }, {});
+  return { ok: !taken };
+};
+
+// Insert/replace one entry (matched by username) in an array-blob, then sort by points desc.
+const upsertEntry = (key, entry) =>
+  mergeWrite(key, (arr) => {
+    const base = Array.isArray(arr) ? arr : [];
+    const filtered = base.filter((e) => e.username !== entry.username);
+    filtered.push(entry);
+    filtered.sort((a, b) => b.points - a.points);
+    return filtered;
+  }, []);
+
+// Patch fields on one existing array entry (matched by username); no-op if absent.
+const patchEntry = (key, username, partial) =>
+  mergeWrite(key, (arr) => (Array.isArray(arr) ? arr.map((e) => (e.username === username ? { ...e, ...partial } : e)) : []), []);
+
+// Set one field inside an object-blob (e.g. submissions[username] = sub).
+const setObjField = (key, field, value) =>
+  mergeWrite(key, (o) => ({ ...(o || {}), [field]: value }), {});
+
+// Delete one field from an object-blob (e.g. remove a user's submission).
+const deleteObjField = (key, field) =>
+  mergeWrite(key, (o) => { const n = { ...(o || {}) }; delete n[field]; return n; }, {});
+
+// Append a value to an array-blob if not already present (e.g. groupsub members).
+const appendUnique = (key, value) =>
+  mergeWrite(key, (arr) => { const a = Array.isArray(arr) ? arr : []; return a.includes(value) ? a : [...a, value]; }, []);
+
+// Add/remove a member inside a group object's nested members array (preserves concurrent changes).
+const mutateGroupMembers = (key, fn) =>
+  mergeWrite(key, (g) => (g ? { ...g, members: fn(Array.isArray(g.members) ? g.members : []) } : g), null);
+
 const ADMIN_PASSWORD = "whatis2026";
 const GOLD = "#C9A84C";
 const BLACK = "#0A0A0A";
@@ -192,9 +256,8 @@ export default function App() {
           if (uR.status === "fulfilled" && uR.value) {
             const allUsers = JSON.parse(uR.value.value);
             if (allUsers[su.username] && !allUsers[su.username].joined) {
-              allUsers[su.username] = { ...allUsers[su.username], joined: su.joined };
-              setUsers(allUsers);
-              apiStorage.set("users", JSON.stringify(allUsers));
+              setUsers(prev => ({ ...prev, [su.username]: { ...prev[su.username], joined: su.joined } }));
+              mergeUser(su.username, { joined: su.joined });
             }
           }
         }
@@ -204,8 +267,27 @@ export default function App() {
     setLoading(false);
   };
 
-  const saveUsers = async (u) => { setUsers(u); await apiStorage.set("users", JSON.stringify(u)); };
-  const saveLB = async (lb) => { setLeaderboard(lb); await apiStorage.set(`leaderboard:${monthKey()}`, JSON.stringify(lb)); };
+  // Persist ONE user's change safely (re-fetch + merge), reflecting it locally too.
+  const saveUser = async (username, partial) => {
+    setUsers(prev => ({ ...prev, [username]: { ...(prev[username] || {}), ...partial } }));
+    await mergeUser(username, partial);
+  };
+  // Register a brand-new user atomically; returns {ok:false} if the name was taken.
+  const registerUser = async (username, full) => {
+    const res = await registerUserUnique(username, full);
+    if (res.ok) setUsers(prev => ({ ...prev, [username]: full }));
+    return res;
+  };
+  // Upsert the current user's leaderboard entry safely (re-fetch + merge by username).
+  const saveLBEntry = async (entry) => {
+    setLeaderboard(prev => { const f = prev.filter(e => e.username !== entry.username); f.push(entry); f.sort((a, b) => b.points - a.points); return f; });
+    await upsertEntry(`leaderboard:${monthKey()}`, entry);
+  };
+  // Patch a field on the current user's leaderboard entry (e.g. displayName) safely.
+  const patchLBEntry = async (username, partial) => {
+    setLeaderboard(prev => prev.map(e => e.username === username ? { ...e, ...partial } : e));
+    await patchEntry(`leaderboard:${monthKey()}`, username, partial);
+  };
 
   const goTab = (id) => { setTab(id); setMenuOpen(false); setMoreOpen(false); };
 
@@ -325,11 +407,11 @@ export default function App() {
       )}
 
       <div style={s.main}>
-        {tab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUsers={saveUsers} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLB={saveLB} />}
+        {tab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
         {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} />}
         {tab === "winners"     && <WinnersTab />}
-        {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUsers={saveUsers} users={users} />}
-        {tab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUsers={saveUsers} leaderboard={leaderboard} saveLB={saveLB} />}
+        {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} />}
+        {tab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
         {tab === "archive"     && <ArchiveTab />}
         {tab === "rules"       && <RulesTab />}
         {tab === "contact"     && <ContactTab />}
@@ -339,7 +421,7 @@ export default function App() {
   );
 }
 
-function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSubmissions, leaderboard, saveLB }) {
+function PlayTab({ user, setUser, users, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ username: "", email: "", password: "", state: "" });
   const [answer, setAnswer] = useState("");
@@ -387,20 +469,21 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     try { const r = await apiStorage.get(`history:${username}`); if (r) setHistory(JSON.parse(r.value)); } catch (e) {}
   };
 
-  const doAuth = () => {
+  const doAuth = async () => {
     setError("");
     if (authMode === "register") {
       if (!form.username || !form.email || !form.password || !form.state) return setError("All fields required.");
       if (users[form.username]) return setError("Username taken.");
       const nu = { username: form.username, email: form.email, password: form.password, state: form.state, streak: 0, joined: todayKey() };
-      saveUsers({ ...users, [form.username]: nu });
+      const res = await registerUser(form.username, nu);
+      if (!res.ok) return setError("Username taken.");
       setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     } else {
       const f = users[form.username];
       if (!f || f.password !== form.password) return setError("Invalid username or password.");
       // Self-heal: legacy accounts created before the joined field existed
       const healed = f.joined ? f : { ...f, joined: todayKey() };
-      if (!f.joined) saveUsers({ ...users, [form.username]: healed });
+      if (!f.joined) await saveUser(form.username, { joined: healed.joined });
       setUser(healed); localStorage.setItem("whatis_user", JSON.stringify(healed));
     }
     setForm({ username: "", email: "", password: "", state: "" });
@@ -428,18 +511,17 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     setSubmissions(newSubs);
     // Save to localStorage immediately — this is the primary guard on return visits
     localStorage.setItem(`sub:${todayKey()}:${user.username}`, JSON.stringify(sub));
-    await apiStorage.set(`submissions:${todayKey()}`, JSON.stringify(newSubs));
+    await setObjField(`submissions:${todayKey()}`, user.username, sub);
     const streak = correct ? (user.streak || 0) + 1 : 0;
     const nu = { ...user, streak };
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
-    await saveUsers({ ...users, [user.username]: { ...users[user.username], streak } });
+    await saveUser(user.username, { streak });
     const ex = leaderboard.find(e => e.username === user.username);
     const medalUpdate = globalMedal ? { [`${globalMedal}Corrects`]: ((ex?.[`${globalMedal}Corrects`] || 0) + 1) } : {};
-    let newLB;
-    if (ex) newLB = leaderboard.map(e => e.username === user.username ? { ...e, points: e.points + pts, correct: e.correct + (correct ? 1 : 0), streak, answered: e.answered + 1, ...medalUpdate } : e);
-    else newLB = [...leaderboard, { username: user.username, displayName: user.displayName || "", state: user.state || "", points: pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate }];
-    newLB.sort((a, b) => b.points - a.points);
-    await saveLB(newLB);
+    const entry = ex
+      ? { ...ex, points: ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1, ...medalUpdate }
+      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate };
+    await saveLBEntry(entry);
 
     // Update archive with gold winner
     if (globalMedal === "gold" && correct) {
@@ -461,15 +543,15 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
         const groupMedal = correct ? getMedal(gsub.length) : null;
         const groupBonus = correct && groupMedal ? Math.round(base * MEDAL[groupMedal].multiplier) : 0;
         const groupPts = correct ? base + groupBonus : 0;
-        if (correct) await apiStorage.set(`groupsub:${code}:${todayKey()}`, JSON.stringify([...gsub, user.username]));
+        if (correct) await appendUnique(`groupsub:${code}:${todayKey()}`, user.username);
         const gR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
         let glb = gR ? JSON.parse(gR.value) : [];
         const gex = glb.find(e => e.username === user.username);
         const gMedalUpdate = groupMedal ? { [`${groupMedal}Corrects`]: ((gex?.[`${groupMedal}Corrects`] || 0) + 1) } : {};
-        if (gex) glb = glb.map(e => e.username === user.username ? { ...e, points: e.points + groupPts, correct: e.correct + (correct ? 1 : 0), streak, answered: e.answered + 1, ...gMedalUpdate } : e);
-        else glb = [...glb, { username: user.username, state: user.state || "", points: groupPts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...gMedalUpdate }];
-        glb.sort((a, b) => b.points - a.points);
-        await apiStorage.set(`grouplb:${code}:${monthKey()}`, JSON.stringify(glb));
+        const gentry = gex
+          ? { ...gex, points: gex.points + groupPts, correct: gex.correct + (correct ? 1 : 0), streak, answered: gex.answered + 1, ...gMedalUpdate }
+          : { username: user.username, state: user.state || "", points: groupPts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...gMedalUpdate };
+        await upsertEntry(`grouplb:${code}:${monthKey()}`, gentry);
       } catch (e) {}
     }
 
@@ -925,7 +1007,7 @@ function ArchiveTab() {
   );
 }
 
-function GroupsTab({ user, setUser, saveUsers, users }) {
+function GroupsTab({ user, setUser, saveUser, users }) {
   // view: "home" | "create" | "join" | "group"
   const [view, setView] = useState("home");
   const [activeGroup, setActiveGroup] = useState(null);
@@ -978,7 +1060,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
     await apiStorage.set(`group:${code}`, JSON.stringify(group));
     const updatedGroups = [...(user.groups || []), code];
     const nu = { ...user, groups: updatedGroups };
-    await saveUsers({ ...users, [user.username]: { ...users[user.username], groups: updatedGroups } });
+    await saveUser(user.username, { groups: updatedGroups });
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     setGroupData({ ...groupData, [code]: group });
     setGroupLBs({ ...groupLBs, [code]: [] });
@@ -995,10 +1077,10 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
       const r = await apiStorage.get(`group:${code}`);
       if (!r) return setJoinError("Group not found. Check the code and try again.");
       const group = JSON.parse(r.value);
-      if (!group.members.includes(user.username)) { group.members.push(user.username); await apiStorage.set(`group:${code}`, JSON.stringify(group)); }
+      if (!group.members.includes(user.username)) { group.members.push(user.username); await mutateGroupMembers(`group:${code}`, (m) => m.includes(user.username) ? m : [...m, user.username]); }
       const updatedGroups = [...(user.groups || []), code];
       const nu = { ...user, groups: updatedGroups };
-      await saveUsers({ ...users, [user.username]: { ...users[user.username], groups: updatedGroups } });
+      await saveUser(user.username, { groups: updatedGroups });
       setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
       const lbR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
       const grp = { ...groupData, [code]: group };
@@ -1015,7 +1097,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
     if (!newGroupName.trim()) return setRenameError("Name can't be empty.");
     if (newGroupName.length > 30) return setRenameError("Max 30 characters.");
     const updated = { ...groupData[activeGroup], name: newGroupName.trim() };
-    await apiStorage.set(`group:${activeGroup}`, JSON.stringify(updated));
+    await mergeWrite(`group:${activeGroup}`, (g) => (g ? { ...g, name: newGroupName.trim() } : g), null);
     setGroupData({ ...groupData, [activeGroup]: updated });
     setRenaming(false); setNewGroupName("");
   };
@@ -1025,13 +1107,12 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
     // Remove user from group's members list
     const g = groupData[code];
     if (g) {
-      const updatedGroup = { ...g, members: g.members.filter(m => m !== user.username) };
-      await apiStorage.set(`group:${code}`, JSON.stringify(updatedGroup));
+      await mutateGroupMembers(`group:${code}`, (m) => m.filter(x => x !== user.username));
     }
     // Remove group code from user's groups array
     const updatedGroups = (user.groups || []).filter(c => c !== code);
     const nu = { ...user, groups: updatedGroups };
-    await saveUsers({ ...users, [user.username]: { ...users[user.username], groups: updatedGroups } });
+    await saveUser(user.username, { groups: updatedGroups });
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     // Clean up local state
     const newGD = { ...groupData }; delete newGD[code];
@@ -1249,7 +1330,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
   );
 }
 
-function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
+function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry }) {
   const [history, setHistory] = useState(null);
   const [loading, setLoading] = useState(true);
   const [editingName, setEditingName] = useState(false);
@@ -1274,10 +1355,9 @@ function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
     const nu = { ...user, [field]: value };
     setUser(nu);
     localStorage.setItem("whatis_user", JSON.stringify(nu));
-    await saveUsers({ ...users, [user.username]: { ...users[user.username], [field]: value } });
+    await saveUser(user.username, { [field]: value });
     if (field === "displayName") {
-      const updatedLB = leaderboard.map(e => e.username === user.username ? { ...e, displayName: value } : e);
-      await saveLB(updatedLB);
+      await patchLBEntry(user.username, { displayName: value });
     }
     onDone();
     setNameSaved(true); setTimeout(() => setNameSaved(false), 2500);
@@ -2116,23 +2196,21 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     );
                   })()}
                   <button style={{ ...s.btn, width: "100%" }} onClick={async () => {
-                    const updated = { ...adminUsers };
-                    if (editForm.username !== u.username) delete updated[u.username];
-                    updated[editForm.username] = { ...u, ...editForm };
-                    setAdminUsers(updated);
-                    await apiStorage.set("users", JSON.stringify(updated));
+                    const renamed = editForm.username !== u.username;
+                    const merged = await mergeWrite("users", (o) => {
+                      const next = { ...(o || {}) };
+                      if (renamed) delete next[u.username];
+                      next[editForm.username] = { ...((o || {})[u.username] || u), ...editForm };
+                      return next;
+                    }, {});
+                    setAdminUsers(merged);
                     setEditingUser(null); setUserSaved(true);
                     setTimeout(() => setUserSaved(false), 3000);
                   }}>Save changes</button>
                   <button style={{ ...s.btnSec, width: "100%", marginTop: 8, color: "#E05C5C", borderColor: "rgba(224,92,92,0.3)" }} onClick={async () => {
                     const dateKey = todayKey();
-                    // Remove from DB submissions
-                    const sR = await apiStorage.get(`submissions:${dateKey}`).catch(() => null);
-                    if (sR) {
-                      const subs = JSON.parse(sR.value);
-                      delete subs[u.username];
-                      await apiStorage.set(`submissions:${dateKey}`, JSON.stringify(subs));
-                    }
+                    // Remove from DB submissions (merge-safe — preserves other players' submissions)
+                    await deleteObjField(`submissions:${dateKey}`, u.username);
                     // Set reset flag so their localStorage gets cleared on next load
                     await apiStorage.set(`sub_reset:${dateKey}:${u.username}`, "1");
                     // Clear locally so the panel updates immediately
