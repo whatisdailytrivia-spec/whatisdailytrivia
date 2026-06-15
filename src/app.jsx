@@ -144,6 +144,7 @@ const TABS = [
   { id: "leaderboard", label: "Leaderboard" },
   { id: "winners", label: "Winners" },
   { id: "groups", label: "Groups" },
+  { id: "account", label: "My Account" },
   { id: "archive", label: "Archive" },
   { id: "rules", label: "Rules" },
   { id: "contact", label: "Contact" },
@@ -223,6 +224,7 @@ export default function App() {
                 { id: "play",        label: "Today's Question" },
                 { id: "leaderboard", label: "Leaderboard" },
                 { id: "groups",      label: "Groups" },
+                { id: "account",     label: "My Account" },
               ].map(t => (
                 <button key={t.id} style={{ ...s.tab, ...(tab === t.id ? s.tabActive : {}) }} onClick={() => goTab(t.id)}>
                   {t.label}
@@ -311,6 +313,7 @@ export default function App() {
         {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} />}
         {tab === "winners"     && <WinnersTab />}
         {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUsers={saveUsers} users={users} />}
+        {tab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUsers={saveUsers} leaderboard={leaderboard} saveLB={saveLB} />}
         {tab === "archive"     && <ArchiveTab />}
         {tab === "rules"       && <RulesTab />}
         {tab === "contact"     && <ContactTab />}
@@ -330,6 +333,9 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
+  const [editingName, setEditingName] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [nameSaved, setNameSaved] = useState(false);
   const answered = user && submissions[user.username];
 
   // Instantly restore today's submission from localStorage (before DB responds)
@@ -368,6 +374,22 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     try { const r = await apiStorage.get(`history:${username}`); if (r) setHistory(JSON.parse(r.value)); } catch (e) {}
   };
 
+  const saveDisplayName = async () => {
+    const trimmed = newDisplayName.trim();
+    if (!trimmed || trimmed === (user.displayName || user.username)) { setEditingName(false); return; }
+    const nu = { ...user, displayName: trimmed };
+    setUser(nu);
+    localStorage.setItem("whatis_user", JSON.stringify(nu));
+    await saveUsers({ ...users, [user.username]: { ...users[user.username], displayName: trimmed } });
+    // Update display name in current month leaderboard
+    const updatedLB = leaderboard.map(e => e.username === user.username ? { ...e, displayName: trimmed } : e);
+    await saveLB(updatedLB);
+    setEditingName(false);
+    setNewDisplayName("");
+    setNameSaved(true);
+    setTimeout(() => setNameSaved(false), 2500);
+  };
+
   const doAuth = () => {
     setError("");
     if (authMode === "register") {
@@ -386,6 +408,8 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
 
   const submit = async () => {
     if (!answer.trim() || submitting) return;
+    // Hard block — never award points on the sample/placeholder question
+    if (!question || question.id === "q1" || !question.points) return;
     // Hard guard — check both localStorage and DB state before proceeding
     const localKey = `sub:${todayKey()}:${user.username}`;
     if (localStorage.getItem(localKey) || submissions[user.username]) return;
@@ -393,8 +417,8 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     const responseTime = Math.round((Date.now() - viewStart) / 1000);
     const speedMult    = calcMultiplier(responseTime);
     const correct      = checkAnswer(answer, question.answer, question.aliases || []);
-    const base         = question.points || 200;
-    const pts          = correct ? Math.round(base * speedMult) : 0;
+    const base         = (question && question.id !== "q1" && question.points) ? question.points : 0;
+    const pts          = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
     const globalCorrectCount = Object.values(submissions).filter(s => s.isCorrect).length;
     const globalMedal  = correct ? getMedal(globalCorrectCount) : null; // cosmetic only
     const sub = { answer, isCorrect: correct, points: pts, basePoints: base,
@@ -413,7 +437,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     const medalUpdate = globalMedal ? { [`${globalMedal}Corrects`]: ((ex?.[`${globalMedal}Corrects`] || 0) + 1) } : {};
     let newLB;
     if (ex) newLB = leaderboard.map(e => e.username === user.username ? { ...e, points: e.points + pts, correct: e.correct + (correct ? 1 : 0), streak, answered: e.answered + 1, ...medalUpdate } : e);
-    else newLB = [...leaderboard, { username: user.username, state: user.state || "", points: pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate }];
+    else newLB = [...leaderboard, { username: user.username, displayName: user.displayName || "", state: user.state || "", points: pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate }];
     newLB.sort((a, b) => b.points - a.points);
     await saveLB(newLB);
 
@@ -482,6 +506,15 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
   }).format(new Date()), 10);
   const isPreWindow = user && !hasRealQuestion && estHour < 6;
 
+  // Auto-reload: if it's past 6am EST but we still have the SAMPLE, silently re-fetch
+  useEffect(() => {
+    if (!hasRealQuestion && estHour >= 6) {
+      apiStorage.get(`question:${todayKey()}`).then(r => {
+        if (r) { try { setQuestion(JSON.parse(r.value)); } catch(e) {} }
+      }).catch(() => {});
+    }
+  }, [hasRealQuestion, estHour]);
+
   if (!user) return (
     <div>
       <div style={{ textAlign: "center", marginBottom: 24 }}>
@@ -535,16 +568,36 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
 
   return (
     <div>
-      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
+      {/* ── Header ────────────────────────────────────── */}
+      <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <div style={{ ...s.label, marginBottom: 3 }}>{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} · Daily Question</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.8rem" }}>{daysLeft()} days left · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
+          <div style={{ ...s.label, fontSize: "0.72rem", marginBottom: 4 }}>Daily Question</div>
+          <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: OFF_WHITE }}>
+            {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
+          </div>
         </div>
-        <div style={{ ...s.badge, background: cat.bg, color: cat.text }}>{question?.category}</div>
+        <div style={{ textAlign: "right" }}>
+          <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, marginBottom: 5 }}>
+            # of Players: <span style={{ color: OFF_WHITE, fontWeight: 600 }}>{leaderboard.length}</span>
+          </div>
+          <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC }}>
+            This Month\'s Prize: <span style={{ color: GOLD, fontWeight: 600 }}>$100</span>
+          </div>
+        </div>
       </div>
-      <div style={s.card}>
+
+      {/* ── Main Card ─────────────────────────────────── */}
+      <div style={{ ...s.card, padding: "20px 22px", marginBottom: 22 }}>
         <div style={s.accent} />
-        <div style={{ ...s.label, fontSize: "0.82rem" }}>Today's question · {question?.points || 200} pts</div>
+
+        {/* Card label row */}
+        <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
+          <div style={{ ...s.label, fontSize: "0.65rem", margin: 0 }}>Today\'s Question</div>
+          <span style={{ ...s.badge, background: cat.bg, color: cat.text }}>{question?.category}</span>
+          <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{question?.points || 200} pts</span>
+        </div>
+
+        {/* Optional image */}
         {question?.imageType === "map" && question?.numericCode && (
           <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
         )}
@@ -559,94 +612,80 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
             )}
           </div>
         )}
-        <div style={s.h1}>{question?.question}</div>
-      </div>
-      {!answered && !result && (() => {
-        const mult       = calcMultiplier(elapsed);
-        const pct        = Math.round(mult * 100);
-        const inGrace    = elapsed < GRACE_PERIOD;
-        const atFloor    = mult <= SCORE_FLOOR;
-        const barColor   = inGrace ? GOLD : atFloor ? "#E05C5C" : "#E8954E";
-        const timeToFloor = Math.max(0, FLOOR_TIME - elapsed);
-        const phase      = inGrace
-          ? `Grace period · ${GRACE_PERIOD - elapsed}s remaining`
-          : atFloor
-          ? `Score floor reached`
-          : `Floor in ${fmtTime(timeToFloor)}`;
-        return (
-          <div style={{ marginBottom: 14 }}>
-            {/* Labels */}
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
-              <div style={{ ...s.mono, fontSize: "0.65rem", color: atFloor ? "#E05C5C" : inGrace ? GOLD : TEXT_MUTED }}>
-                {phase}
+
+        {/* Question text */}
+        <div style={{ ...s.h1, marginBottom: 18 }}>{question?.question}</div>
+
+        {/* ── Answer input (before submit) ──────────── */}
+        {!answered && !result && (() => {
+          const mult      = calcMultiplier(elapsed);
+          const pct       = Math.round(mult * 100);
+          const inGrace   = elapsed < GRACE_PERIOD;
+          const atFloor   = mult <= SCORE_FLOOR;
+          const barColor  = inGrace ? GOLD : atFloor ? "#E05C5C" : "#E8954E";
+          const timeToFloor = Math.max(0, FLOOR_TIME - elapsed);
+          const phase     = inGrace
+            ? `Grace period · ${GRACE_PERIOD - elapsed}s remaining`
+            : atFloor ? `Score floor reached`
+            : `Floor in ${fmtTime(timeToFloor)}`;
+          return (
+            <div style={{ borderTop: `1px solid ${SURFACE3}`, paddingTop: 16 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 10 }}>
+                <div style={{ fontFamily: SERIF, fontSize: "0.95rem", color: GOLD, fontStyle: "italic" }}>"What is..."</div>
+                <div style={{ ...s.mono, fontSize: "0.65rem", color: barColor }}>{phase} · {pct}%</div>
               </div>
-              <div style={{ ...s.mono, fontSize: "0.65rem", color: barColor, fontWeight: 600 }}>
-                {pct}% · {Math.round((question?.points || 200) * mult)}pts
+              <div style={{ display: "flex", gap: 8 }}>
+                <input style={s.input} placeholder="Type your answer..." value={answer}
+                  onChange={e => setAnswer(e.target.value)}
+                  onKeyDown={e => e.key === "Enter" && submit()} />
+                <button style={{ ...s.btn, whiteSpace: "nowrap" }} onClick={submit} disabled={submitting}>Submit</button>
               </div>
             </div>
-          </div>
-        );
-      })()}
-      {!answered && !result && (
-        <div style={{ marginBottom: 22 }}>
-          <div style={{ fontFamily: SERIF, fontSize: "1rem", color: GOLD, fontStyle: "italic", marginBottom: 8 }}>"What is..."</div>
-          <div style={{ display: "flex", gap: 8 }}>
-            <input style={s.input} placeholder="Type your answer..." value={answer} onChange={e => setAnswer(e.target.value)} onKeyDown={e => e.key === "Enter" && submit()} />
-            <button style={{ ...s.btn, whiteSpace: "nowrap" }} onClick={submit}>Submit</button>
-          </div>
-        </div>
-      )}
-      {(result || answered) && (() => {
-        const sub = result || submissions[user?.username];
-        const ok  = sub?.isCorrect;
-        return (
-          <div style={{ marginTop: 8, marginBottom: 18 }}>
-            <div style={{ padding: "13px 16px", borderRadius: 8, fontWeight: 500,
-              background: ok ? "rgba(76,175,125,0.1)" : "rgba(224,92,92,0.1)",
-              border: `1px solid ${ok ? "rgba(76,175,125,0.3)" : "rgba(224,92,92,0.3)"}`,
-              color: ok ? "#4CAF7D" : "#E05C5C" }}>
-              {ok ? "✓ Correct!" : "✗ Not quite — try again tomorrow."}
-              <div style={{ marginTop: 6, fontFamily: SERIF, fontSize: "0.9rem", color: OFF_WHITE, fontStyle: "italic" }}>
+          );
+        })()}
+
+        {/* ── Result row (after submit) ─────────────── */}
+        {(result || answered) && (() => {
+          const sub = result || submissions[user?.username];
+          const ok  = sub?.isCorrect;
+          return (
+            <div style={{ borderTop: `1px solid ${SURFACE3}`, paddingTop: 14 }}>
+              <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 0,
+                background: ok ? "rgba(76,175,125,0.08)" : "rgba(224,92,92,0.08)",
+                border: `1px solid ${ok ? "rgba(76,175,125,0.25)" : "rgba(224,92,92,0.25)"}`,
+                borderRadius: 8, overflow: "hidden" }}>
+                <div style={{ padding: "12px 14px", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}` }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.88rem", color: ok ? "#4CAF7D" : "#E05C5C", marginBottom: 4 }}>
+                    {ok ? "✓ Correct!" : "✗ Incorrect"}
+                  </div>
+                  <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC }}>Time: {sub?.responseTime}s</div>
+                </div>
+                <div style={{ padding: "12px 14px", textAlign: "center", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}` }}>
+                  <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Speed Multiplier</div>
+                  <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: OFF_WHITE }}>{sub?.speedMult ?? 100}%</div>
+                </div>
+                <div style={{ padding: "12px 14px", textAlign: "right" }}>
+                  <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Points</div>
+                  <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: GOLD }}>+{sub?.points}</div>
+                </div>
+              </div>
+              <div style={{ marginTop: 10, fontFamily: SERIF, fontSize: "0.88rem", color: TEXT_SEC, fontStyle: "italic" }}>
                 What is... {question?.displayAnswer || question?.answer}
               </div>
-              {sub?.medal && MEDAL[sub.medal] && (
-                <div style={{ marginTop: 7, display: "inline-flex", alignItems: "center", gap: 5,
+              {ok && sub?.medal && MEDAL[sub.medal] && (
+                <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5,
                   background: "rgba(201,168,76,0.15)", border: "1px solid rgba(201,168,76,0.4)",
                   borderRadius: 100, padding: "3px 11px" }}>
                   <span>{MEDAL[sub.medal].emoji}</span>
-                  <span style={{ ...s.mono, fontSize: "0.7rem", color: GOLD }}>{MEDAL[sub.medal].label} correct!</span>
+                  <span style={{ ...s.mono, fontSize: "0.68rem", color: GOLD }}>{MEDAL[sub.medal].label} correct!</span>
                 </div>
               )}
             </div>
-            {ok && (
-              <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginTop: 10 }}>
-                {[
-                  { l: "Time taken",       v: `${sub.responseTime}s` },
-                  { l: "Speed multiplier", v: `${sub.speedMult ?? 100}%` },
-                  { l: "Points earned",    v: `+${sub.points}`, gold: true },
-                ].map((x, i) => (
-                  <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`,
-                    borderRadius: 8, padding: "11px 13px", textAlign: "center" }}>
-                    <div style={{ fontFamily: SERIF, fontSize: "1.1rem", fontWeight: 700,
-                      color: x.gold ? GOLD : OFF_WHITE }}>{x.v}</div>
-                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED,
-                      textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{x.l}</div>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-        );
-      })()}
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 18, marginTop: 18 }}>
-        {[{ v: leaderboard.length, l: "Total Player Count", gold: true }, { v: `${user?.streak || 0}🔥`, l: "Streak" }, { v: "$100", l: "This Month's Prize", gold: true }].map((x, i) => (
-          <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 14px" }}>
-            <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color: x.gold ? GOLD : OFF_WHITE }}>{x.v}</div>
-            <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{x.l}</div>
-          </div>
-        ))}
+          );
+        })()}
       </div>
-      <hr style={s.divider} />
+
+            <hr style={s.divider} />
       <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 12 }}>Top 5 this month</div>
       {leaderboard.length === 0
         ? <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>
@@ -655,7 +694,30 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
       {history && (
         <div style={{ marginTop: 28 }}>
           <hr style={s.divider} />
-          <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 14 }}>My all-time stats</div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 14 }}>
+            <div style={{ ...s.label, fontSize: "0.65rem" }}>My all-time stats</div>
+            {!editingName ? (
+              <button onClick={() => { setNewDisplayName(user.displayName || user.username); setEditingName(true); }}
+                style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.75rem", display: "flex", alignItems: "center", gap: 4, fontFamily: SANS }}>
+                ✎ <span style={{ ...s.mono, fontSize: "0.65rem" }}>{user.displayName || user.username}</span>
+              </button>
+            ) : (
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <input
+                  style={{ ...s.input, padding: "5px 9px", fontSize: "0.78rem", width: 140 }}
+                  value={newDisplayName}
+                  maxLength={20}
+                  onChange={e => setNewDisplayName(e.target.value)}
+                  onKeyDown={e => { if (e.key === "Enter") saveDisplayName(); if (e.key === "Escape") setEditingName(false); }}
+                  autoFocus
+                  placeholder="Display name"
+                />
+                <button onClick={saveDisplayName} style={{ ...s.btn, padding: "5px 10px", fontSize: "0.72rem" }}>Save</button>
+                <button onClick={() => setEditingName(false)} style={{ ...s.btnSec, padding: "5px 8px", fontSize: "0.72rem" }}>✕</button>
+              </div>
+            )}
+          </div>
+          {nameSaved && <div style={{ ...s.mono, fontSize: "0.68rem", color: "#4CAF7D", marginBottom: 10 }}>✓ Display name updated</div>}
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginBottom: 14 }}>
             {[
               { v: history.totalAnswered, l: "Played" },
@@ -702,7 +764,7 @@ function LBRow({ entry, rank, isMe }) {
       <div style={{ ...s.mono, fontSize: "0.8rem", color: rank <= 3 ? GOLD : TEXT_MUTED, textAlign: "center" }}>{medals[rank] || rank}</div>
       <div>
         <div style={{ fontWeight: 500, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
-          {entry.username}
+          {entry.displayName || entry.username}
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
         </div>
@@ -1248,6 +1310,234 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
   );
 }
 
+function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
+  const [history, setHistory] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [editingName, setEditingName] = useState(false);
+  const [newDisplayName, setNewDisplayName] = useState("");
+  const [nameSaved, setNameSaved] = useState(false);
+  const [editingEmail, setEditingEmail] = useState(false);
+  const [newEmail, setNewEmail] = useState("");
+  const [editingState, setEditingState] = useState(false);
+  const [newState, setNewState] = useState("");
+
+  useEffect(() => { if (user) load(); }, [user?.username]);
+
+  const load = async () => {
+    setLoading(true);
+    try { const r = await apiStorage.get(`history:${user.username}`); if (r) setHistory(JSON.parse(r.value)); } catch(e) {}
+    setLoading(false);
+  };
+
+  const saveField = async (field, value, onDone) => {
+    const nu = { ...user, [field]: value };
+    setUser(nu);
+    localStorage.setItem("whatis_user", JSON.stringify(nu));
+    await saveUsers({ ...users, [user.username]: { ...users[user.username], [field]: value } });
+    if (field === "displayName") {
+      const updatedLB = leaderboard.map(e => e.username === user.username ? { ...e, displayName: value } : e);
+      await saveLB(updatedLB);
+    }
+    onDone();
+    setNameSaved(true); setTimeout(() => setNameSaved(false), 2500);
+  };
+
+  if (!user) return (
+    <div style={{ textAlign: "center", padding: "60px 0" }}>
+      <div style={{ fontFamily: SERIF, fontSize: "1.15rem", color: OFF_WHITE, marginBottom: 8 }}>Sign in to view your account</div>
+      <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>Create an account or sign in from Today's Question.</div>
+    </div>
+  );
+
+  const myLB = leaderboard.find(e => e.username === user.username);
+  const myRank = myLB ? leaderboard.indexOf(myLB) + 1 : null;
+  const acc = history && history.totalAnswered > 0 ? Math.round((history.totalCorrect / history.totalAnswered) * 100) : 0;
+  const avgTime = history?.responseTimes?.length > 0 ? Math.round(history.responseTimes.reduce((a,b)=>a+b,0)/history.responseTimes.length) : null;
+  const initials = (user.displayName || user.username || "?").slice(0,2).toUpperCase();
+  const joined = user.joined ? new Date(user.joined + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "—";
+  const recentLog = (history?.dailyLog || []).slice(-7).reverse();
+
+  const StatBox = ({ v, l, gold }) => (
+    <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "13px 10px", textAlign: "center" }}>
+      <div style={{ fontFamily: SERIF, fontSize: "1.25rem", fontWeight: 700, color: gold ? GOLD : OFF_WHITE }}>{v}</div>
+      <div style={{ ...s.mono, fontSize: "0.58rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4, lineHeight: 1.3 }}>{l}</div>
+    </div>
+  );
+
+  const EditRow = ({ label, value, editing, onEdit, children }) => (
+    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "10px 0", borderBottom: `1px solid ${SURFACE3}` }}>
+      <div>
+        <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>{label}</div>
+        {!editing && <div style={{ fontSize: "0.88rem", color: OFF_WHITE }}>{value || <span style={{ color: TEXT_MUTED }}>—</span>}</div>}
+        {editing && children}
+      </div>
+      {!editing && <button onClick={onEdit} style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.75rem", fontFamily: SANS }}>✎ edit</button>}
+    </div>
+  );
+
+  return (
+    <div>
+      {/* ── Header ─────────────────────────────────────── */}
+      <div style={{ textAlign: "center", marginBottom: 24 }}>
+        <div style={{ width: 64, height: 64, borderRadius: "50%", background: `rgba(201,168,76,0.15)`, border: `2px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD }}>{initials}</div>
+        <div style={{ fontFamily: SERIF, fontSize: "1.4rem", fontWeight: 700, color: OFF_WHITE }}>{user.displayName || user.username}</div>
+        <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_MUTED, marginTop: 4 }}>@{user.username}</div>
+        {nameSaved && <div style={{ ...s.mono, fontSize: "0.68rem", color: "#4CAF7D", marginTop: 6 }}>✓ Saved</div>}
+      </div>
+
+      {/* ── This Month ─────────────────────────────────── */}
+      {myLB && (
+        <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10, padding: "14px 18px", marginBottom: 20, display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 12, textAlign: "center" }}>
+          <div>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Rank</div>
+            <div style={{ fontFamily: SERIF, fontSize: "1.6rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>#{myRank}</div>
+          </div>
+          <div>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Points</div>
+            <div style={{ fontFamily: SERIF, fontSize: "1.6rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{myLB.points}</div>
+          </div>
+          <div>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Correct</div>
+            <div style={{ fontFamily: SERIF, fontSize: "1.6rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{myLB.correct}/{myLB.answered}</div>
+          </div>
+        </div>
+      )}
+
+      {/* ── Account Info ───────────────────────────────── */}
+      <div style={s.card}>
+        <div style={s.accent} />
+        <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 4 }}>Account Info</div>
+
+        <EditRow label="Display Name" value={user.displayName || user.username} editing={editingName}
+          onEdit={() => { setNewDisplayName(user.displayName || user.username); setEditingName(true); }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <input style={{ ...s.input, padding: "5px 9px", fontSize: "0.78rem", width: 150 }} value={newDisplayName} maxLength={20}
+              onChange={e => setNewDisplayName(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") saveField("displayName", newDisplayName.trim(), () => setEditingName(false)); if (e.key === "Escape") setEditingName(false); }}
+              autoFocus />
+            <button onClick={() => saveField("displayName", newDisplayName.trim(), () => setEditingName(false))} style={{ ...s.btn, padding: "5px 10px", fontSize: "0.72rem" }}>Save</button>
+            <button onClick={() => setEditingName(false)} style={{ ...s.btnSec, padding: "5px 8px", fontSize: "0.72rem" }}>✕</button>
+          </div>
+        </EditRow>
+
+        <EditRow label="Email" value={user.email} editing={editingEmail}
+          onEdit={() => { setNewEmail(user.email || ""); setEditingEmail(true); }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <input style={{ ...s.input, padding: "5px 9px", fontSize: "0.78rem", width: 180 }} value={newEmail} type="email"
+              onChange={e => setNewEmail(e.target.value)}
+              onKeyDown={e => { if (e.key === "Enter") saveField("email", newEmail.trim(), () => setEditingEmail(false)); if (e.key === "Escape") setEditingEmail(false); }}
+              autoFocus />
+            <button onClick={() => saveField("email", newEmail.trim(), () => setEditingEmail(false))} style={{ ...s.btn, padding: "5px 10px", fontSize: "0.72rem" }}>Save</button>
+            <button onClick={() => setEditingEmail(false)} style={{ ...s.btnSec, padding: "5px 8px", fontSize: "0.72rem" }}>✕</button>
+          </div>
+        </EditRow>
+
+        <EditRow label="State" value={user.state} editing={editingState}
+          onEdit={() => { setNewState(user.state || ""); setEditingState(true); }}>
+          <div style={{ display: "flex", gap: 6, marginTop: 4 }}>
+            <select style={{ ...s.input, padding: "5px 9px", fontSize: "0.78rem", width: 120 }} value={newState} onChange={e => setNewState(e.target.value)} autoFocus>
+              <option value="">—</option>
+              {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"].map(st => <option key={st} value={st}>{st}</option>)}
+            </select>
+            <button onClick={() => saveField("state", newState, () => setEditingState(false))} style={{ ...s.btn, padding: "5px 10px", fontSize: "0.72rem" }}>Save</button>
+            <button onClick={() => setEditingState(false)} style={{ ...s.btnSec, padding: "5px 8px", fontSize: "0.72rem" }}>✕</button>
+          </div>
+        </EditRow>
+
+        <div style={{ padding: "10px 0", borderBottom: `1px solid ${SURFACE3}` }}>
+          <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Username</div>
+          <div style={{ fontSize: "0.88rem", color: TEXT_SEC }}>{user.username} <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>(login · cannot change)</span></div>
+        </div>
+        <div style={{ padding: "10px 0" }}>
+          <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Member Since</div>
+          <div style={{ fontSize: "0.88rem", color: OFF_WHITE }}>{joined}</div>
+        </div>
+      </div>
+
+      {/* ── All-Time Stats ─────────────────────────────── */}
+      {loading && <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", textAlign: "center", padding: "24px 0" }}>Loading stats...</div>}
+      {!loading && history && (
+        <>
+          <div style={{ ...s.label, fontSize: "0.65rem", margin: "22px 0 10px" }}>All-Time Performance</div>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginBottom: 14 }}>
+            <StatBox v={history.totalAnswered} l="Played" />
+            <StatBox v={history.totalCorrect} l="Correct" />
+            <StatBox v={`${acc}%`} l="Accuracy" gold={acc >= 70} />
+            <StatBox v={(history.totalPoints || 0).toLocaleString()} l="Total Points" gold />
+            <StatBox v={`🔥 ${history.bestStreak || 0}`} l="Best Streak" />
+            <StatBox v={avgTime ? `${avgTime}s` : "—"} l="Avg Speed" />
+          </div>
+
+          {/* Medals */}
+          <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 7, marginBottom: 22 }}>
+            {[
+              { emoji: "🥇", label: "First Correct", count: history.goldCorrects || 0, color: "#FFD700", bg: "rgba(255,215,0,0.08)", border: "rgba(255,215,0,0.2)" },
+              { emoji: "🥈", label: "Second Correct", count: history.silverCorrects || 0, color: "#C0C0C0", bg: "rgba(192,192,192,0.08)", border: "rgba(192,192,192,0.2)" },
+              { emoji: "🥉", label: "Third Correct", count: history.bronzeCorrects || 0, color: "#CD7F32", bg: "rgba(205,127,50,0.08)", border: "rgba(205,127,50,0.2)" },
+            ].map(m => (
+              <div key={m.label} style={{ background: m.bg, border: `1px solid ${m.border}`, borderRadius: 8, padding: "12px 8px", textAlign: "center" }}>
+                <div style={{ fontSize: "1.4rem", marginBottom: 4 }}>{m.emoji}</div>
+                <div style={{ fontFamily: SERIF, fontSize: "1.2rem", fontWeight: 700, color: m.color }}>{m.count}</div>
+                <div style={{ ...s.mono, fontSize: "0.58rem", color: TEXT_MUTED, textTransform: "uppercase", marginTop: 3 }}>{m.label}</div>
+              </div>
+            ))}
+          </div>
+
+          {/* Category Breakdown */}
+          {Object.keys(history.categoryStats || {}).length > 0 && (
+            <>
+              <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 10 }}>By Category</div>
+              {Object.entries(history.categoryStats).sort((a,b) => b[1].answered - a[1].answered).map(([cat, stats]) => {
+                const pct = stats.answered > 0 ? Math.round((stats.correct / stats.answered) * 100) : 0;
+                const c = CAT[cat] || CAT.Wildcard;
+                return (
+                  <div key={cat} style={{ display: "grid", gridTemplateColumns: "90px 1fr 50px 40px", alignItems: "center", gap: 8, padding: "8px 13px", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 7, marginBottom: 5 }}>
+                    <div style={{ fontSize: "0.76rem", color: c.text, fontWeight: 500 }}>{cat}</div>
+                    <div style={{ background: SURFACE2, borderRadius: 100, height: 5, overflow: "hidden" }}>
+                      <div style={{ width: `${pct}%`, height: "100%", background: c.text, borderRadius: 100 }} />
+                    </div>
+                    <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, textAlign: "right" }}>{stats.correct}/{stats.answered}</div>
+                    <div style={{ ...s.mono, fontSize: "0.68rem", color: pct >= 70 ? "#4CAF7D" : pct >= 40 ? GOLD : "#E05C5C", textAlign: "right", fontWeight: 600 }}>{pct}%</div>
+                  </div>
+                );
+              })}
+            </>
+          )}
+
+          {/* Recent 7 Days */}
+          {recentLog.length > 0 && (
+            <>
+              <div style={{ ...s.label, fontSize: "0.65rem", margin: "22px 0 10px" }}>Recent Activity</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 5 }}>
+                {recentLog.map((entry, i) => {
+                  const d = new Date(entry.date + "T00:00:00").toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric" });
+                  const c = CAT[entry.category] || CAT.Wildcard;
+                  return (
+                    <div key={i} style={{ display: "grid", gridTemplateColumns: "110px 1fr auto auto", alignItems: "center", gap: 10, padding: "8px 13px", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 7 }}>
+                      <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{d}</div>
+                      <div style={{ fontSize: "0.72rem", color: c.text }}>{entry.category}</div>
+                      <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{entry.responseTime}s</div>
+                      <div style={{ ...s.mono, fontSize: "0.72rem", fontWeight: 600, color: entry.correct ? "#4CAF7D" : "#E05C5C" }}>
+                        {entry.correct ? `+${entry.points}` : "✗"}
+                      </div>
+                    </div>
+                  );
+                })}
+              </div>
+            </>
+          )}
+
+          {!history.totalAnswered && (
+            <div style={{ ...s.card, textAlign: "center", padding: "32px", marginTop: 16 }}>
+              <div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No game history yet — answer today's question to get started!</div>
+            </div>
+          )}
+        </>
+      )}
+    </div>
+  );
+}
+
 function RulesTab() {
   const rules = [
     { icon: "📅", text: "New trivia question drops every morning." },
@@ -1473,6 +1763,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const parsed = JSON.parse(e.target.result);
         if (!Array.isArray(parsed) || !parsed.length) throw new Error("Must be a non-empty array.");
         if (!parsed[0].question || !parsed[0].answer) throw new Error("Items need 'question' and 'answer' fields.");
+        const missingPoints = parsed.filter(q => !q.points || ![100,200,300,400].includes(Number(q.points)));
+        if (missingPoints.length) throw new Error(`${missingPoints.length} question(s) missing a valid 'points' field (must be 100, 200, 300, or 400).`);
         await apiStorage.set(`question_bank:${monthKey}`, JSON.stringify(parsed));
         setMonthBanks(prev => ({ ...prev, [monthKey]: parsed }));
         setUploadStatus(prev => ({ ...prev, [monthKey]: "success" }));
