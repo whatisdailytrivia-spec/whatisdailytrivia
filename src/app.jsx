@@ -1342,6 +1342,12 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
   const [newState, setNewState] = useState("");
   const [editingAvatar, setEditingAvatar] = useState(false);
   const [newAvatar, setNewAvatar] = useState("");
+  const [showPassword, setShowPassword] = useState(false);
+  const [editingPassword, setEditingPassword] = useState(false);
+  const [newPassword, setNewPassword] = useState("");
+  const [confirmPassword, setConfirmPassword] = useState("");
+  const [pwError, setPwError] = useState("");
+  const [pwSaved, setPwSaved] = useState(false);
 
   useEffect(() => { if (user) load(); }, [user?.username]);
 
@@ -1361,6 +1367,16 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
     }
     onDone();
     setNameSaved(true); setTimeout(() => setNameSaved(false), 2500);
+  };
+
+  const changePassword = async () => {
+    setPwError("");
+    if (!newPassword) return setPwError("Enter a new password.");
+    if (newPassword.length < 4) return setPwError("Password must be at least 4 characters.");
+    if (newPassword !== confirmPassword) return setPwError("Passwords don't match.");
+    await saveField("password", newPassword, () => {});
+    setEditingPassword(false); setNewPassword(""); setConfirmPassword(""); setShowPassword(false);
+    setPwSaved(true); setTimeout(() => setPwSaved(false), 2500);
   };
 
   if (!user) return (
@@ -1490,6 +1506,43 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
             <button onClick={() => setEditingState(false)} style={{ ...s.btnSec, padding: "5px 8px", fontSize: "0.72rem" }}>✕</button>
           </div>
         </EditRow>
+
+        {/* Password — show/hide + change */}
+        <div style={{ padding: "10px 0", borderBottom: `1px solid ${SURFACE3}` }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
+            <div style={{ flex: 1, minWidth: 0 }}>
+              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Password</div>
+              <div style={{ fontSize: "0.88rem", color: TEXT_SEC, fontFamily: showPassword ? SANS : "monospace", letterSpacing: showPassword ? "normal" : "0.15em", wordBreak: "break-all" }}>
+                {showPassword ? (user.password || "—") : "••••••••"}
+              </div>
+            </div>
+            {!editingPassword && (
+              <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                <button onClick={() => setShowPassword(v => !v)} style={{ ...s.btnSec, padding: "4px 10px", fontSize: "0.72rem" }}>{showPassword ? "Hide" : "Show"}</button>
+                <button onClick={() => { setEditingPassword(true); setNewPassword(""); setConfirmPassword(""); setPwError(""); }} style={{ ...s.btnSec, padding: "4px 10px", fontSize: "0.72rem" }}>Change</button>
+              </div>
+            )}
+          </div>
+          {editingPassword && (
+            <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+              <input style={{ ...s.input, padding: "7px 10px", fontSize: "0.82rem" }} type={showPassword ? "text" : "password"} placeholder="New password" value={newPassword}
+                onChange={e => { setNewPassword(e.target.value); setPwError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") changePassword(); if (e.key === "Escape") setEditingPassword(false); }} autoFocus />
+              <input style={{ ...s.input, padding: "7px 10px", fontSize: "0.82rem" }} type={showPassword ? "text" : "password"} placeholder="Confirm new password" value={confirmPassword}
+                onChange={e => { setConfirmPassword(e.target.value); setPwError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") changePassword(); if (e.key === "Escape") setEditingPassword(false); }} />
+              {pwError && <div style={{ color: "#E05C5C", fontSize: "0.76rem" }}>{pwError}</div>}
+              <div style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                <button onClick={changePassword} style={{ ...s.btn, padding: "6px 14px", fontSize: "0.76rem" }}>Update password</button>
+                <button onClick={() => { setEditingPassword(false); setNewPassword(""); setConfirmPassword(""); setPwError(""); }} style={{ ...s.btnSec, padding: "6px 10px", fontSize: "0.76rem" }}>Cancel</button>
+                <label style={{ display: "flex", alignItems: "center", gap: 5, fontSize: "0.72rem", color: TEXT_MUTED, cursor: "pointer", marginLeft: "auto" }}>
+                  <input type="checkbox" checked={showPassword} onChange={e => setShowPassword(e.target.checked)} /> Show
+                </label>
+              </div>
+            </div>
+          )}
+          {pwSaved && <div style={{ ...s.mono, fontSize: "0.68rem", color: "#4CAF7D", marginTop: 6 }}>✓ Password updated</div>}
+        </div>
 
         <div style={{ padding: "10px 0", borderBottom: `1px solid ${SURFACE3}` }}>
           <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Username</div>
