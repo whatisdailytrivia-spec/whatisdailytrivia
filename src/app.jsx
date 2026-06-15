@@ -782,6 +782,10 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
   const [joinError, setJoinError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
   const [loading, setLoading] = useState(true);
+  const [renaming, setRenaming] = useState(false);
+  const [newGroupName, setNewGroupName] = useState("");
+  const [renameError, setRenameError] = useState("");
+  const [confirmLeave, setConfirmLeave] = useState(false);
 
   const genCode = () => {
     const chars = "ABCDEFGHJKLMNPQRSTUVWXYZ23456789";
@@ -850,6 +854,36 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
     } catch(e) { setJoinError("Something went wrong. Try again."); }
   };
 
+  const renameGroup = async () => {
+    setRenameError("");
+    if (!newGroupName.trim()) return setRenameError("Name can't be empty.");
+    if (newGroupName.length > 30) return setRenameError("Max 30 characters.");
+    const updated = { ...groupData[activeGroup], name: newGroupName.trim() };
+    await apiStorage.set(`group:${activeGroup}`, JSON.stringify(updated));
+    setGroupData({ ...groupData, [activeGroup]: updated });
+    setRenaming(false); setNewGroupName("");
+  };
+
+  const leaveGroup = async () => {
+    const code = activeGroup;
+    // Remove user from group's members list
+    const g = groupData[code];
+    if (g) {
+      const updatedGroup = { ...g, members: g.members.filter(m => m !== user.username) };
+      await apiStorage.set(`group:${code}`, JSON.stringify(updatedGroup));
+    }
+    // Remove group code from user's groups array
+    const updatedGroups = (user.groups || []).filter(c => c !== code);
+    const nu = { ...user, groups: updatedGroups };
+    await saveUsers({ ...users, [user.username]: { ...users[user.username], groups: updatedGroups } });
+    setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
+    // Clean up local state
+    const newGD = { ...groupData }; delete newGD[code];
+    const newLBs = { ...groupLBs }; delete newLBs[code];
+    setGroupData(newGD); setGroupLBs(newLBs);
+    setConfirmLeave(false); setActiveGroup(null); setView("home");
+  };
+
   if (!user) return (
     <div style={{ textAlign: "center", padding: "60px 0" }}>
       <div style={{ fontFamily: SERIF, fontSize: "1.15rem", color: OFF_WHITE, marginBottom: 6 }}>Sign in to access Groups</div>
@@ -864,22 +898,68 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
     const g = groupData[activeGroup];
     const lb = groupLBs[activeGroup] || [];
     if (!g) return null;
+    const isCreator = g.createdBy === user.username;
     return (
       <div>
-        <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); }} style={{ ...s.btnSec, marginBottom: 20, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+        <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); }} style={{ ...s.btnSec, marginBottom: 20, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
         <div style={s.label}>Group leaderboard</div>
-        <div style={s.h2}>{g.name}</div>
-        <div style={{ display: "flex", gap: 10, alignItems: "center", marginBottom: 16, flexWrap: "wrap" }}>
-          <div style={{ color: TEXT_SEC, fontSize: "0.8rem" }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long" })}</div>
-        </div>
+
+        {/* Group name + rename */}
+        {renaming ? (
+          <div style={{ marginBottom: 16 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                style={{ ...s.input, fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, flex: 1 }}
+                value={newGroupName}
+                maxLength={30}
+                onChange={e => { setNewGroupName(e.target.value); setRenameError(""); }}
+                onKeyDown={e => e.key === "Enter" && renameGroup()}
+                autoFocus
+              />
+              <button style={{ ...s.btn, padding: "9px 14px", whiteSpace: "nowrap" }} onClick={renameGroup}>Save</button>
+              <button style={{ ...s.btnSec, padding: "9px 12px" }} onClick={() => { setRenaming(false); setNewGroupName(""); setRenameError(""); }}>✕</button>
+            </div>
+            {renameError && <div style={{ color: "#E05C5C", fontSize: "0.78rem", marginTop: 5 }}>{renameError}</div>}
+          </div>
+        ) : (
+          <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
+            <div style={s.h2}>{g.name}</div>
+            {isCreator && (
+              <button onClick={() => { setNewGroupName(g.name); setRenaming(true); }} style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.8rem", padding: "2px 6px", marginBottom: 10 }}>✎ rename</button>
+            )}
+          </div>
+        )}
+
+        <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 16 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long" })}</div>
+
+        {/* Invite code */}
         <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: "11px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
           <div style={{ fontSize: "0.8rem", color: TEXT_SEC }}>Invite code — share to add members</div>
           <div style={{ ...s.mono, fontSize: "1rem", fontWeight: 700, color: GOLD, letterSpacing: "0.15em" }}>{g.code}</div>
         </div>
+
+        {/* Leaderboard */}
         {lb.length === 0
           ? <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>
           : lb.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} />)
         }
+
+        {/* Leave group */}
+        <div style={{ marginTop: 28, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
+          {confirmLeave ? (
+            <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.25)", borderRadius: 8, padding: "14px 16px" }}>
+              <div style={{ fontSize: "0.85rem", color: OFF_WHITE, marginBottom: 12 }}>Are you sure you want to leave <strong>{g.name}</strong>? Your scores will remain on the leaderboard but you'll stop competing here.</div>
+              <div style={{ display: "flex", gap: 8 }}>
+                <button style={{ ...s.btn, background: "#E05C5C", flex: 1 }} onClick={leaveGroup}>Yes, leave group</button>
+                <button style={{ ...s.btnSec, flex: 1 }} onClick={() => setConfirmLeave(false)}>Cancel</button>
+              </div>
+            </div>
+          ) : (
+            <button onClick={() => setConfirmLeave(true)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "9px 16px", color: "#E05C5C", fontFamily: SANS, fontSize: "0.8rem", cursor: "pointer", width: "100%" }}>
+              Leave group
+            </button>
+          )}
+        </div>
       </div>
     );
   }
@@ -1294,7 +1374,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     <div>
       <div style={s.label}>Admin Panel</div>
       <div style={{ display: "flex", gap: 5, marginBottom: 22, flexWrap: "wrap" }}>
-        {[["questions","📅 Questions"],["scheduler","⚡ Scheduler"],["manual","✏️ Manual"],["users","👥 Users"]].map(([k, l]) => (
+        {[["questions","📅 Questions"],["scheduler","⚡ Scheduler"],["manual","✏️ Manual"],["users","👥 Users"],["preview","📋 Preview"]].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)}
             style={{ padding: "7px 12px", borderRadius: 6,
               border: section === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`,
@@ -1673,6 +1753,74 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           ))}
         </div>
       )}
+
+      {/* ── PREVIEW ──────────────────────────────────────────────────────── */}
+      {section === "preview" && (() => {
+        const ptC = { 100: "#4CAF7D", 200: "#6495ED", 300: GOLD, 400: "#E05C5C" };
+        const ptL = { 100: "Easy", 200: "Medium", 300: "Hard", 400: "Expert" };
+
+        const items = [];
+        slots.forEach(({ key, label }) => {
+          const bank = monthBanks[key];
+          if (!bank) return;
+          const [yr, mo] = key.split("-").map(Number);
+          const daysInMonth = new Date(yr, mo, 0).getDate();
+          for (let day = 1; day <= daysInMonth; day++) {
+            if (key === currentMonthKey && day <= dayOfMonth) continue;
+            const q = bank[day - 1];
+            if (!q || !q.question || q.answer === "N/A" || q.question === "Past question — not published.") continue;
+            const d = new Date(yr, mo - 1, day);
+            items.push({
+              dateStr: `${String(mo).padStart(2,"0")}/${String(day).padStart(2,"0")}/${yr}`,
+              dayName: d.toLocaleDateString("en-US", { weekday: "short" }),
+              monthLabel: label, monthKey: key, ...q
+            });
+          }
+        });
+
+        const grouped = {};
+        const order = [];
+        items.forEach(item => {
+          if (!grouped[item.monthKey]) { grouped[item.monthKey] = []; order.push(item.monthKey); }
+          grouped[item.monthKey].push(item);
+        });
+
+        return (
+          <div>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+              <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{items.length} upcoming question{items.length !== 1 ? "s" : ""} across {order.length} month{order.length !== 1 ? "s" : ""}</span>
+              <button style={{ ...s.btnSec, padding: "5px 12px", fontSize: "0.72rem" }} onClick={() => loadAdminData()}>↺ Refresh</button>
+            </div>
+            {items.length === 0 ? (
+              <div style={{ color: TEXT_MUTED, textAlign: "center", padding: "40px 0", fontSize: "0.85rem" }}>No upcoming questions found. Upload question banks in the 📅 Questions tab.</div>
+            ) : order.map(monthKey => {
+              const qs = grouped[monthKey];
+              const label = qs[0].monthLabel;
+              return (
+                <div key={monthKey} style={{ marginBottom: 28 }}>
+                  <div style={{ ...s.label, marginBottom: 10 }}>{label} · {qs.length} question{qs.length !== 1 ? "s" : ""}</div>
+                  <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+                    {qs.map((q, i) => {
+                      const cat = CAT[q.category] || CAT.Wildcard;
+                      return (
+                        <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "13px 15px" }}>
+                          <div style={{ display: "flex", gap: 8, alignItems: "center", marginBottom: 9, flexWrap: "wrap" }}>
+                            <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED }}>{q.dayName} {q.dateStr}</span>
+                            <span style={{ ...s.badge, background: cat.bg, color: cat.text, borderRadius: 4, padding: "2px 7px", fontSize: "0.65rem" }}>{q.category}</span>
+                            <span style={{ ...s.mono, fontSize: "0.63rem", color: ptC[q.points] || GOLD, background: `${ptC[q.points] || GOLD}18`, border: `1px solid ${ptC[q.points] || GOLD}30`, borderRadius: 4, padding: "2px 7px" }}>{ptL[q.points] || "?"} · {q.points}pts</span>
+                          </div>
+                          <div style={{ fontSize: "0.83rem", color: OFF_WHITE, lineHeight: 1.65, marginBottom: 9 }}>{q.question}</div>
+                          <div style={{ ...s.mono, fontSize: "0.73rem", color: GOLD }}>✓ {q.displayAnswer || q.answer}</div>
+                        </div>
+                      );
+                    })}
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        );
+      })()}
     </div>
   );
 }
