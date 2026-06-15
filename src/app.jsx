@@ -127,7 +127,7 @@ const s = {
   main: { maxWidth: 680, margin: "0 auto", padding: "28px 16px 80px" },
   card: { background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "22px", marginBottom: 12, position: "relative", overflow: "hidden" },
   accent: { position: "absolute", top: 0, left: 0, right: 0, height: 2, background: `linear-gradient(90deg,${GOLD},${SURFACE3})` },
-  label: { fontFamily: "'Courier New',monospace", fontSize: "0.65rem", letterSpacing: "0.14em", textTransform: "uppercase", color: GOLD, marginBottom: 6 },
+  label: { fontFamily: "'Courier New',monospace", fontSize: "1rem", letterSpacing: "0.14em", textTransform: "uppercase", color: GOLD, marginBottom: 6 },
   h1: { fontFamily: SANS, fontSize: "1.1rem", fontWeight: 600, lineHeight: 1.5, marginBottom: 8, color: OFF_WHITE },
   h2: { fontFamily: SERIF, fontSize: "1.2rem", fontWeight: 700, marginBottom: 12 },
   input: { width: "100%", background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "11px 14px", color: OFF_WHITE, fontFamily: SANS, fontSize: "0.88rem", outline: "none", boxSizing: "border-box" },
@@ -633,7 +633,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
         ))}
       </div>
       <hr style={s.divider} />
-      <div style={{ ...s.label, marginBottom: 12 }}>Top 5 this month</div>
+      <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 12 }}>Top 5 this month</div>
       {leaderboard.length === 0
         ? <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>
         : leaderboard.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)
@@ -641,7 +641,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
       {history && (
         <div style={{ marginTop: 28 }}>
           <hr style={s.divider} />
-          <div style={{ ...s.label, marginBottom: 14 }}>My all-time stats</div>
+          <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 14 }}>My all-time stats</div>
           <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 7, marginBottom: 14 }}>
             {[
               { v: history.totalAnswered, l: "Played" },
@@ -795,13 +795,12 @@ function WinnersTab() {
 function LeaderboardTab({ leaderboard, user }) {
   return (
     <div>
-      <div style={s.label}>Monthly leaderboard</div>
+      <div style={{ ...s.label, fontSize: "1rem" }}>Monthly Leaderboard & Prize</div>
       <div style={s.h2}>{new Date().toLocaleString("default", { month: "long" })} {new Date().getFullYear()}</div>
-      <div style={{ color: TEXT_SEC, fontSize: "0.82rem", marginBottom: 20 }}>{daysLeft()} days remaining · Top scorer wins $100</div>
       <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10, padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
-          <div style={{ ...s.mono, fontSize: "0.65rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
-          <div style={{ fontFamily: SERIF, fontSize: "1.2rem", fontWeight: 700 }}>$100 Visa Gift Card</div>
+          <div style={{ ...s.mono, fontSize: "1rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
+          <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700 }}>$100 Visa Gift Card</div>
           <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginTop: 3 }}>Top scorer wins at month end</div>
         </div>
         <div style={{ textAlign: "center" }}>
@@ -1215,20 +1214,20 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
       )}
 
       {/* Main CTAs */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 12 }}>
-        <div onClick={() => setView("create")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 12, padding: "28px 16px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
+      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
+        <div onClick={() => setView("create")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
           onMouseEnter={e => e.currentTarget.style.borderColor = GOLD}
           onMouseLeave={e => e.currentTarget.style.borderColor = SURFACE3}>
-          <div style={{ fontSize: "2rem", marginBottom: 12 }}>➕</div>
-          <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: OFF_WHITE, marginBottom: 6 }}>Create a Group</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.78rem", lineHeight: 1.5 }}>Start a private leaderboard and invite your crew</div>
+          <div style={{ fontSize: "1.3rem", marginBottom: 8, opacity: 0.6 }}>➕</div>
+          <div style={{ fontFamily: SERIF, fontSize: "0.88rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Create a Group</div>
+          <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", lineHeight: 1.5 }}>Start a private leaderboard and invite your crew</div>
         </div>
-        <div onClick={() => setView("join")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 12, padding: "28px 16px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
+        <div onClick={() => setView("join")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
           onMouseEnter={e => e.currentTarget.style.borderColor = GOLD}
           onMouseLeave={e => e.currentTarget.style.borderColor = SURFACE3}>
-          <div style={{ fontSize: "2rem", marginBottom: 12 }}>🔗</div>
-          <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: OFF_WHITE, marginBottom: 6 }}>Join a Group</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.78rem", lineHeight: 1.5 }}>Enter an invite code to join an existing group</div>
+          <div style={{ fontSize: "1.3rem", marginBottom: 8, opacity: 0.6 }}>🔗</div>
+          <div style={{ fontFamily: SERIF, fontSize: "0.88rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Join a Group</div>
+          <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", lineHeight: 1.5 }}>Enter an invite code to join an existing group</div>
         </div>
       </div>
     </div>
@@ -1294,11 +1293,11 @@ function RulesTab() {
         </div>
       </div>
       <div style={s.label}>Weekly schedule</div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(7,1fr)", gap: 4, marginTop: 8, marginBottom: 24 }}>
+      <div style={{ display: "flex", flexDirection: "column", gap: 5, marginTop: 8, marginBottom: 24 }}>
         {sched.map(x => (
-          <div key={x.d} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 7, padding: "9px 3px", textAlign: "center" }}>
-            <div style={{ ...s.mono, fontSize: "0.58rem", color: TEXT_MUTED, marginBottom: 4, textTransform: "uppercase" }}>{x.d}</div>
-            <div style={{ fontSize: "0.65rem", color: x.c, fontWeight: 500, lineHeight: 1.3 }}>{x.cat}</div>
+          <div key={x.d} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 7, padding: "9px 14px", display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+            <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em" }}>{x.d}</div>
+            <div style={{ fontSize: "0.78rem", color: x.c, fontWeight: 500 }}>{x.cat}</div>
           </div>
         ))}
       </div>
@@ -1649,7 +1648,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
 
           {todayQ && (
             <div>
-              <div style={s.label}>Today — {slots[0].label}, Day {dayOfMonth}</div>
+              <div style={{ ...s.label, fontSize: "0.65rem" }}>Today — {slots[0].label}, Day {dayOfMonth}</div>
               <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 7, padding: "8px 13px", marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}>
                 <span>⏰</span>
                 <span>{(() => { const d = new Date(); if (d.getHours() < 6) return d; const t = new Date(); t.setDate(t.getDate() + 1); return t; })().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} — publishes automatically at <strong>6:00 AM EST</strong></span>
@@ -1875,9 +1874,13 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
 
         return (
           <div>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", marginBottom: 18 }}>
+            <div style={{ marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
               <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{items.length} upcoming question{items.length !== 1 ? "s" : ""} across {order.length} month{order.length !== 1 ? "s" : ""}</span>
-              <button style={{ ...s.btnSec, padding: "5px 12px", fontSize: "0.72rem" }} onClick={() => loadAdminData()}>↺ Refresh</button>
+              {items.length > 0 && (
+                <span style={{ ...s.mono, fontSize: "0.67rem", color: GOLD }}>
+                  Last question: {items[items.length - 1].dateStr}
+                </span>
+              )}
             </div>
             {items.length === 0 ? (
               <div style={{ color: TEXT_MUTED, textAlign: "center", padding: "40px 0", fontSize: "0.85rem" }}>No upcoming questions found. Upload question banks in the 📅 Questions tab.</div>
@@ -1886,7 +1889,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               const label = qs[0].monthLabel;
               return (
                 <div key={monthKey} style={{ marginBottom: 28 }}>
-                  <div style={{ ...s.label, marginBottom: 10 }}>{label} · {qs.length} question{qs.length !== 1 ? "s" : ""}</div>
+                  <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 10 }}>{label} · {qs.length} question{qs.length !== 1 ? "s" : ""}</div>
                   <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
                     {qs.map((q, i) => {
                       const cat = CAT[q.category] || CAT.Wildcard;
