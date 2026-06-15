@@ -477,18 +477,10 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <div style={{ ...s.label, marginBottom: 3 }}>{todayKey()} · Daily Question</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.8rem" }}>{daysLeft()} days left · {new Date().toLocaleString("default", { month: "long" })}</div>
+          <div style={{ ...s.label, marginBottom: 3 }}>{new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} · Daily Question</div>
+          <div style={{ color: TEXT_SEC, fontSize: "0.8rem" }}>{daysLeft()} days left · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
         </div>
         <div style={{ ...s.badge, background: cat.bg, color: cat.text }}>{question?.category}</div>
-      </div>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 18 }}>
-        {[{ v: leaderboard.length, l: "Players", gold: true }, { v: `${user?.streak || 0}🔥`, l: "Streak" }, { v: "$100", l: "Prize", gold: true }].map((x, i) => (
-          <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 14px" }}>
-            <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color: x.gold ? GOLD : OFF_WHITE }}>{x.v}</div>
-            <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{x.l}</div>
-          </div>
-        ))}
       </div>
       <div style={s.card}>
         <div style={s.accent} />
@@ -586,6 +578,14 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
           </div>
         );
       })()}
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8, marginBottom: 18, marginTop: 18 }}>
+        {[{ v: leaderboard.length, l: "Total Player Count", gold: true }, { v: `${user?.streak || 0}🔥`, l: "Streak" }, { v: "$100", l: "This Month's Prize", gold: true }].map((x, i) => (
+          <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 14px" }}>
+            <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color: x.gold ? GOLD : OFF_WHITE }}>{x.v}</div>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 4 }}>{x.l}</div>
+          </div>
+        ))}
+      </div>
       <hr style={s.divider} />
       <div style={{ ...s.label, marginBottom: 12 }}>Top 5 this month</div>
       {leaderboard.length === 0
@@ -1606,6 +1606,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           {todayQ && (
             <div>
               <div style={s.label}>Today — {slots[0].label}, Day {dayOfMonth}</div>
+              <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 7, padding: "8px 13px", marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}>
+                <span>⏰</span>
+                <span>{(() => { const d = new Date(); if (d.getHours() < 6) return d; const t = new Date(); t.setDate(t.getDate() + 1); return t; })().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} — publishes automatically at <strong>6:00 AM EST</strong></span>
+              </div>
               <div style={{ ...s.card, marginBottom: 18 }}>
                 <div style={s.accent} />
                 <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
@@ -1634,67 +1638,6 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                   {saved ? "✓ Published!" : "⚡ Publish today's question"}
                 </button>
               </div>
-
-              {/* Upcoming questions — spans into next month if needed */}
-              {(() => {
-                const fromCurrent = currentBank.slice(dayOfMonth, dayOfMonth + 15).map((q, i) => ({
-                  ...q, _dayLabel: `Day ${dayOfMonth + i + 1}`, _monthLabel: slots[0].label,
-                }));
-                const remaining   = 15 - fromCurrent.length;
-                const nextKey     = slots[1]?.key;
-                const nextBank    = nextKey ? (monthBanks[nextKey] || []) : [];
-                const fromNext    = nextBank.slice(0, remaining).map((q, i) => ({
-                  ...q, _dayLabel: `Day ${i + 1}`, _monthLabel: slots[1]?.label,
-                }));
-                const upcoming = [...fromCurrent, ...fromNext];
-                if (!upcoming.length) return null;
-                return (
-                  <div>
-                    <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED,
-                      textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 10 }}>
-                      Next {upcoming.length} question{upcoming.length !== 1 ? "s" : ""}
-                    </div>
-                    {upcoming.map((q, i) => {
-                      const cat = CAT[q.category] || CAT.Wildcard;
-                      const isNextMonth = q._monthLabel !== slots[0].label;
-                      return (
-                        <div key={i} style={{ display: "flex", alignItems: "center", gap: 10,
-                          padding: "9px 12px", marginBottom: 5, borderRadius: 7,
-                          background: isNextMonth ? "rgba(201,168,76,0.04)" : SURFACE,
-                          border: `1px solid ${isNextMonth ? "rgba(201,168,76,0.15)" : SURFACE3}` }}>
-                          <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, minWidth: 44 }}>
-                            {q._dayLabel}
-                          </div>
-                          {isNextMonth && (
-                            <div style={{ ...s.mono, fontSize: "0.6rem", color: GOLD,
-                              background: "rgba(201,168,76,0.1)", borderRadius: 4, padding: "1px 5px",
-                              whiteSpace: "nowrap" }}>
-                              {q._monthLabel?.split(" ")[0]}
-                            </div>
-                          )}
-                          <span style={{ ...s.badge, background: cat.bg, color: cat.text, flexShrink: 0 }}>
-                            {q.category}
-                          </span>
-                          <div style={{ fontSize: "0.8rem", color: TEXT_SEC, flex: 1,
-                            overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-                            {q.answer}
-                          </div>
-                          <span style={{ ...s.mono, fontSize: "0.65rem", color: ptC[q.points] }}>
-                            {q.points}pts
-                          </span>
-                        </div>
-                      );
-                    })}
-                    {remaining > 0 && nextBank.length === 0 && (
-                      <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED,
-                        padding: "8px 12px", background: SURFACE2, borderRadius: 7,
-                        border: `1px dashed ${SURFACE3}`, textAlign: "center" }}>
-                        Upload {slots[1]?.label} questions to see more
-                      </div>
-                    )}
-                  </div>
-                );
-              })()}
             </div>
           )}
 
