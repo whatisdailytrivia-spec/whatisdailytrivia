@@ -141,7 +141,7 @@ const s = {
 
 const TABS = [
   { id: "play", label: "Today's Question" },
-  { id: "leaderboard", label: "Leaderboard" },
+  { id: "leaderboard", label: "Global Leaderboard" },
   { id: "winners", label: "Winners" },
   { id: "groups", label: "Groups" },
   { id: "account", label: "My Account" },
@@ -183,7 +183,23 @@ export default function App() {
       if (sR.status === "fulfilled" && sR.value) setSubmissions(JSON.parse(sR.value.value));
       if (lR.status === "fulfilled" && lR.value) setLeaderboard(JSON.parse(lR.value.value));
       const saved = localStorage.getItem("whatis_user");
-      if (saved) setUser(JSON.parse(saved));
+      if (saved) {
+        let su = JSON.parse(saved);
+        // Self-heal: legacy accounts created before the joined field existed
+        if (!su.joined) {
+          su = { ...su, joined: todayKey() };
+          localStorage.setItem("whatis_user", JSON.stringify(su));
+          if (uR.status === "fulfilled" && uR.value) {
+            const allUsers = JSON.parse(uR.value.value);
+            if (allUsers[su.username] && !allUsers[su.username].joined) {
+              allUsers[su.username] = { ...allUsers[su.username], joined: su.joined };
+              setUsers(allUsers);
+              apiStorage.set("users", JSON.stringify(allUsers));
+            }
+          }
+        }
+        setUser(su);
+      }
     } catch (e) { setQuestion(SAMPLE); }
     setLoading(false);
   };
@@ -222,7 +238,7 @@ export default function App() {
               {/* Primary tabs — always visible */}
               {[
                 { id: "play",        label: "Today's Question" },
-                { id: "leaderboard", label: "Leaderboard" },
+                { id: "leaderboard", label: "Global Leaderboard" },
                 { id: "groups",      label: "Groups" },
                 { id: "account",     label: "My Account" },
               ].map(t => (
@@ -382,7 +398,10 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     } else {
       const f = users[form.username];
       if (!f || f.password !== form.password) return setError("Invalid username or password.");
-      setUser(f); localStorage.setItem("whatis_user", JSON.stringify(f));
+      // Self-heal: legacy accounts created before the joined field existed
+      const healed = f.joined ? f : { ...f, joined: todayKey() };
+      if (!f.joined) saveUsers({ ...users, [form.username]: healed });
+      setUser(healed); localStorage.setItem("whatis_user", JSON.stringify(healed));
     }
     setForm({ username: "", email: "", password: "", state: "" });
   };
@@ -562,7 +581,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
             # of Players: <span style={{ color: OFF_WHITE, fontWeight: 600 }}>{leaderboard.length}</span>
           </div>
           <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC }}>
-            This Month\'s Prize: <span style={{ color: GOLD, fontWeight: 600 }}>$100</span>
+            This Month's Prize: <span style={{ color: GOLD, fontWeight: 600 }}>$100</span>
           </div>
         </div>
       </div>
@@ -573,7 +592,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
 
         {/* Card label row */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          <div style={{ ...s.label, fontSize: "0.65rem", margin: 0 }}>Today\'s Question</div>
+          <div style={{ ...s.label, fontSize: "0.65rem", margin: 0 }}>Today's Question</div>
           <span style={{ ...s.badge, background: cat.bg, color: cat.text }}>{question?.category}</span>
           <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{question?.points || 200} pts</span>
         </div>
@@ -650,8 +669,9 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
                   <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: GOLD }}>+{sub?.points}</div>
                 </div>
               </div>
-              <div style={{ marginTop: 10, fontFamily: SERIF, fontSize: "0.88rem", color: TEXT_SEC, fontStyle: "italic" }}>
-                What is... {question?.displayAnswer || question?.answer}
+              <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.25)", borderRadius: 8, textAlign: "center" }}>
+                <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
+                <div style={{ fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{question?.displayAnswer || question?.answer}</div>
               </div>
               {ok && sub?.medal && MEDAL[sub.medal] && (
                 <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5,
@@ -1210,19 +1230,19 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
 
       {/* Main CTAs */}
       <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div onClick={() => setView("create")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
-          onMouseEnter={e => e.currentTarget.style.borderColor = GOLD}
-          onMouseLeave={e => e.currentTarget.style.borderColor = SURFACE3}>
-          <div style={{ fontSize: "1.3rem", marginBottom: 8, opacity: 0.6 }}>➕</div>
-          <div style={{ fontFamily: SERIF, fontSize: "0.88rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Create a Group</div>
-          <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", lineHeight: 1.5 }}>Start a private leaderboard and invite your crew</div>
+        <div onClick={() => setView("create")} style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${SURFACE2}`, borderRadius: 10, padding: "16px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = SURFACE3; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = SURFACE2; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}>
+          <div style={{ fontSize: "1.1rem", marginBottom: 7, opacity: 0.4 }}>➕</div>
+          <div style={{ fontFamily: SERIF, fontSize: "0.85rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Create a Group</div>
+          <div style={{ color: TEXT_MUTED, fontSize: "0.7rem", lineHeight: 1.5 }}>Start a private leaderboard and invite your crew</div>
         </div>
-        <div onClick={() => setView("join")} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s" }}
-          onMouseEnter={e => e.currentTarget.style.borderColor = GOLD}
-          onMouseLeave={e => e.currentTarget.style.borderColor = SURFACE3}>
-          <div style={{ fontSize: "1.3rem", marginBottom: 8, opacity: 0.6 }}>🔗</div>
-          <div style={{ fontFamily: SERIF, fontSize: "0.88rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Join a Group</div>
-          <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", lineHeight: 1.5 }}>Enter an invite code to join an existing group</div>
+        <div onClick={() => setView("join")} style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${SURFACE2}`, borderRadius: 10, padding: "16px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
+          onMouseEnter={e => { e.currentTarget.style.borderColor = SURFACE3; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+          onMouseLeave={e => { e.currentTarget.style.borderColor = SURFACE2; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}>
+          <div style={{ fontSize: "1.1rem", marginBottom: 7, opacity: 0.4 }}>🔗</div>
+          <div style={{ fontFamily: SERIF, fontSize: "0.85rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Join a Group</div>
+          <div style={{ color: TEXT_MUTED, fontSize: "0.7rem", lineHeight: 1.5 }}>Enter an invite code to join an existing group</div>
         </div>
       </div>
     </div>
@@ -1239,6 +1259,8 @@ function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
   const [newEmail, setNewEmail] = useState("");
   const [editingState, setEditingState] = useState(false);
   const [newState, setNewState] = useState("");
+  const [editingAvatar, setEditingAvatar] = useState(false);
+  const [newAvatar, setNewAvatar] = useState("");
 
   useEffect(() => { if (user) load(); }, [user?.username]);
 
@@ -1272,8 +1294,8 @@ function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
   const myRank = myLB ? leaderboard.indexOf(myLB) + 1 : null;
   const acc = history && history.totalAnswered > 0 ? Math.round((history.totalCorrect / history.totalAnswered) * 100) : 0;
   const avgTime = history?.responseTimes?.length > 0 ? Math.round(history.responseTimes.reduce((a,b)=>a+b,0)/history.responseTimes.length) : null;
-  const initials = (user.displayName || user.username || "?").slice(0,2).toUpperCase();
-  const joined = user.joined ? new Date(user.joined + "T00:00:00").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }) : "—";
+  const initials = (user.avatarText || (user.displayName || user.username || "?").slice(0,2)).toUpperCase();
+  const joined = user.joined ? new Date(user.joined + "T00:00:00").toLocaleDateString("en-US", { month: "long", year: "numeric" }) : "—";
   const recentLog = (history?.dailyLog || []).slice(-7).reverse();
 
   const StatRow = ({ l, v, gold, top }) => (
@@ -1298,7 +1320,33 @@ function AccountTab({ user, setUser, users, saveUsers, leaderboard, saveLB }) {
     <div>
       {/* ── Header ─────────────────────────────────────── */}
       <div style={{ textAlign: "center", marginBottom: 24 }}>
-        <div style={{ width: 64, height: 64, borderRadius: "50%", background: `rgba(201,168,76,0.15)`, border: `2px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", margin: "0 auto 12px", fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD }}>{initials}</div>
+        {!editingAvatar ? (
+          <div style={{ display: "inline-flex", flexDirection: "column", alignItems: "center", margin: "0 auto 12px" }}>
+            <div
+              onClick={() => { setNewAvatar(user.avatarText || initials); setEditingAvatar(true); }}
+              title="Edit initials"
+              style={{ width: 64, height: 64, borderRadius: "50%", background: `rgba(201,168,76,0.15)`, border: `2px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD, cursor: "pointer" }}>
+              {initials}
+            </div>
+            <button onClick={() => { setNewAvatar(user.avatarText || initials); setEditingAvatar(true); }}
+              style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.65rem", fontFamily: SANS, marginTop: 4 }}>✎ edit</button>
+          </div>
+        ) : (
+          <div style={{ display: "flex", flexDirection: "column", alignItems: "center", gap: 8, margin: "0 auto 12px" }}>
+            <input
+              value={newAvatar}
+              maxLength={2}
+              autoFocus
+              onChange={e => setNewAvatar(e.target.value.toUpperCase())}
+              onKeyDown={e => { if (e.key === "Enter" && newAvatar.trim()) saveField("avatarText", newAvatar.trim().toUpperCase(), () => setEditingAvatar(false)); if (e.key === "Escape") setEditingAvatar(false); }}
+              style={{ width: 64, height: 64, borderRadius: "50%", background: "rgba(201,168,76,0.15)", border: `2px solid ${GOLD}`, textAlign: "center", fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD, outline: "none", textTransform: "uppercase", boxSizing: "border-box" }}
+            />
+            <div style={{ display: "flex", gap: 6 }}>
+              <button onClick={() => newAvatar.trim() && saveField("avatarText", newAvatar.trim().toUpperCase(), () => setEditingAvatar(false))} style={{ ...s.btn, padding: "5px 12px", fontSize: "0.72rem" }}>Save</button>
+              <button onClick={() => setEditingAvatar(false)} style={{ ...s.btnSec, padding: "5px 10px", fontSize: "0.72rem" }}>✕</button>
+            </div>
+          </div>
+        )}
         <div style={{ fontFamily: SERIF, fontSize: "1.4rem", fontWeight: 700, color: OFF_WHITE }}>{user.displayName || user.username}</div>
         <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_MUTED, marginTop: 4 }}>@{user.username}</div>
         {nameSaved && <div style={{ ...s.mono, fontSize: "0.68rem", color: "#4CAF7D", marginTop: 6 }}>✓ Saved</div>}
