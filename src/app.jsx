@@ -194,8 +194,8 @@ const CAT = {
   Wildcard: { bg: "rgba(200,80,80,0.1)", text: "#E05C5C" },
 };
 
-// Shared 4-column grid for leaderboard rows + header: rank | player | score | today
-const LB_COLS = "26px minmax(0,1fr) 64px 84px";
+// Shared 4-column grid for leaderboard rows + header: rank | player | today | score
+const LB_COLS = "24px minmax(0,1fr) 86px 78px";
 
 const s = {
   app: { background: BLACK, minHeight: "100vh", color: OFF_WHITE, fontFamily: SANS },
@@ -774,14 +774,6 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.5rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{question?.displayAnswer || question?.answer}</div>
               </div>
-              {ok && sub?.medal && MEDAL[sub.medal] && (
-                <div style={{ marginTop: 8, display: "inline-flex", alignItems: "center", gap: 5,
-                  background: "rgba(201,168,76,0.15)", border: "1px solid rgba(201,168,76,0.4)",
-                  borderRadius: 100, padding: "3px 11px" }}>
-                  <span>{MEDAL[sub.medal].emoji}</span>
-                  <span style={{ ...s.mono, fontSize: "0.68rem", color: GOLD }}>{MEDAL[sub.medal].label} correct!</span>
-                </div>
-              )}
             </div>
           );
         })()}
@@ -804,14 +796,12 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
 }
 
 function LBHeader() {
+  const hStyle = { ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.2 };
   return (
-    <div style={{ display: "grid", gridTemplateColumns: LB_COLS, alignItems: "end", gap: 8, padding: "0 14px 6px" }}>
-      <div></div>
-      <div></div>
-      <div></div>
-      <div style={{ ...s.mono, fontSize: "0.52rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "right", lineHeight: 1.2 }}>
-        Today's Questions?
-      </div>
+    <div style={{ display: "grid", gridTemplateColumns: LB_COLS, alignItems: "end", gap: 8, padding: "0 14px 7px" }}>
+      <div style={{ ...hStyle, gridColumn: "1 / 3", textAlign: "left" }}>Player</div>
+      <div style={{ ...hStyle, textAlign: "right" }}>Today's Questions?</div>
+      <div style={{ ...hStyle, textAlign: "right" }}>Monthly Score</div>
     </div>
   );
 }
@@ -834,12 +824,12 @@ function LBRow({ entry, rank, isMe, host, answeredToday }) {
             : `🔥${entry.streak || 0} · ${entry.correct || 0}/${entry.answered || 0} correct`}
         </div>
       </div>
-      <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD, textAlign: "right" }}>{host ? "—" : `${entry.points} pts`}</div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
         {answeredToday
           ? <span title="Answered today's question" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "rgba(76,175,125,0.18)", border: "1px solid rgba(76,175,125,0.55)", color: "#4CAF7D", fontSize: "0.68rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
           : <span title="Hasn't answered yet today" style={{ display: "inline-flex", width: 18, height: 18, borderRadius: "50%", border: `1px solid ${SURFACE3}`, flexShrink: 0 }} />}
       </div>
+      <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD, textAlign: "right" }}>{host ? "—" : `${entry.points} pts`}</div>
     </div>
   );
 }
@@ -1875,6 +1865,16 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   }).format(new Date())); // EST day-of-month, matches cron logic
   const todayQ          = currentBank[dayOfMonth - 1] || null;
 
+  // EST "today" and "tomorrow" for the Scheduler view
+  const estToday    = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+  const estTomorrow = new Date(estToday); estTomorrow.setDate(estToday.getDate() + 1);
+  const fmtFullDate = (d) => d.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric", year: "numeric" });
+  const tomorrowMonthKey   = `${estTomorrow.getFullYear()}-${String(estTomorrow.getMonth() + 1).padStart(2, "0")}`;
+  const tomorrowDay        = estTomorrow.getDate();
+  const tomorrowBank       = monthBanks[tomorrowMonthKey] || [];
+  const tomorrowQ          = tomorrowBank[tomorrowDay - 1] || null;
+  const tomorrowMonthLabel = estTomorrow.toLocaleString("default", { month: "long", year: "numeric" });
+
   useEffect(() => { if (adminUnlocked) loadAdminData(); }, [adminUnlocked]);
 
   const loadAdminData = async () => {
@@ -2030,7 +2030,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     <div>
       <div style={s.label}>Admin Panel</div>
       <div style={{ display: "flex", gap: 5, marginBottom: 22, flexWrap: "wrap" }}>
-        {[["questions","📅 Questions"],["scheduler","⚡ Scheduler"],["manual","✏️ Manual"],["users","👥 Users"],["preview","📋 Preview"]].map(([k, l]) => (
+        {[["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"]].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)}
             style={{ padding: "7px 12px", borderRadius: 6,
               border: section === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`,
@@ -2177,104 +2177,41 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       {/* ── SCHEDULER ────────────────────────────────────────────────────── */}
       {section === "scheduler" && (
         <div>
-          {!currentBank.length && (
-            <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.2)",
-              borderRadius: 8, padding: "14px 18px", marginBottom: 18, color: "#E05C5C", fontSize: "0.85rem" }}>
-              No questions loaded for {slots[0].label}. Upload a file in the Questions tab.
-            </div>
-          )}
+          <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 7, padding: "9px 13px", marginBottom: 20, display: "flex", alignItems: "center", gap: 7 }}>
+            <span>⏰</span>
+            <span>Questions publish automatically at <strong>6:00 AM EST</strong> each day — no action needed.</span>
+          </div>
 
-          {todayQ && (
-            <div>
-              <div style={{ ...s.label, fontSize: "0.65rem" }}>Today — {slots[0].label}, Day {dayOfMonth}</div>
-              <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 7, padding: "8px 13px", marginBottom: 10, display: "flex", alignItems: "center", gap: 7 }}>
-                <span>⏰</span>
-                <span>{(() => { const d = new Date(); if (d.getHours() < 6) return d; const t = new Date(); t.setDate(t.getDate() + 1); return t; })().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} — publishes automatically at <strong>6:00 AM EST</strong></span>
-              </div>
-              <div style={{ ...s.card, marginBottom: 18 }}>
-                <div style={s.accent} />
-                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginBottom: 12 }}>
-                  <div style={{ display: "flex", gap: 6 }}>
-                    <span style={{ ...s.badge, background: (CAT[todayQ.category] || CAT.Wildcard).bg,
-                      color: (CAT[todayQ.category] || CAT.Wildcard).text }}>
-                      {todayQ.category}
-                    </span>
-                    <span style={{ ...s.badge, background: `${ptC[todayQ.points]}18`,
-                      color: ptC[todayQ.points] }}>
-                      {ptL[todayQ.points]} · {todayQ.points}pts
-                    </span>
+          {(() => {
+            const renderQCard = (label, dateObj, monthLabel, dayNum, q, isToday) => (
+              <div style={{ marginBottom: 22 }}>
+                <div style={{ ...s.label, fontSize: "0.72rem", color: isToday ? GOLD : TEXT_SEC, marginBottom: 4 }}>{label}</div>
+                <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1.2 }}>{fmtFullDate(dateObj)}</div>
+                <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginTop: 3, marginBottom: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>{monthLabel} · Day {dayNum}</div>
+                {q ? (
+                  <div style={s.card}>
+                    <div style={s.accent} />
+                    <div style={{ display: "flex", alignItems: "center", gap: 6, marginBottom: 12 }}>
+                      <span style={{ ...s.badge, background: (CAT[q.category] || CAT.Wildcard).bg, color: (CAT[q.category] || CAT.Wildcard).text }}>{q.category}</span>
+                      <span style={{ ...s.badge, background: `${ptC[q.points]}18`, color: ptC[q.points] }}>{ptL[q.points]} · {q.points}pts</span>
+                      {isToday && <span style={{ ...s.mono, fontSize: "0.72rem", color: "#4CAF7D", marginLeft: "auto" }}>● Live now</span>}
+                    </div>
+                    <div style={{ fontSize: "0.9rem", fontWeight: 500, lineHeight: 1.5, marginBottom: 10 }}>{q.question}</div>
+                    <div style={{ ...s.mono, fontSize: "0.75rem", color: GOLD, marginBottom: 2 }}>Answer: {q.answer}</div>
+                    <div style={{ ...s.mono, fontSize: "0.75rem", color: TEXT_SEC }}>Display: {q.displayAnswer}</div>
                   </div>
-                  {saved && <span style={{ ...s.mono, fontSize: "0.72rem", color: "#4CAF7D" }}>✓ Live</span>}
-                </div>
-                <div style={{ fontSize: "0.9rem", fontWeight: 500, lineHeight: 1.5, marginBottom: 10 }}>
-                  {todayQ.question}
-                </div>
-                <div style={{ ...s.mono, fontSize: "0.75rem", color: GOLD, marginBottom: 2 }}>
-                  Answer: {todayQ.answer}
-                </div>
-                <div style={{ ...s.mono, fontSize: "0.75rem", color: TEXT_SEC, marginBottom: 14 }}>
-                  Display: {todayQ.displayAnswer}
-                </div>
-                <button style={{ ...s.btn, width: "100%" }} onClick={() => publishQuestion(todayQ)}>
-                  {saved ? "✓ Published!" : "⚡ Publish today's question"}
-                </button>
+                ) : (
+                  <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.2)", borderRadius: 8, padding: "14px 18px", color: "#E05C5C", fontSize: "0.85rem" }}>
+                    No question scheduled for {monthLabel} Day {dayNum}. Upload that month's bank in the 📅 Questions tab.
+                  </div>
+                )}
               </div>
-            </div>
-          )}
-
-          {currentBank.length > 0 && !todayQ && (
-            <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)",
-              borderRadius: 8, padding: "14px 18px", color: GOLD, fontSize: "0.85rem" }}>
-              No question at day {dayOfMonth} in the {slots[0].label} bank ({currentBank.length} questions loaded).
-            </div>
-          )}
-        </div>
-      )}
-
-      {/* ── MANUAL ───────────────────────────────────────────────────────── */}
-      {section === "manual" && (
-        <div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.85rem", marginBottom: 18 }}>
-            Manually set today's question for {todayKey()}
-          </div>
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            {[["Question","question","textarea"],["Accepted answer","answer","input"],["Display answer","displayAnswer","input"]].map(([label, key, type]) => (
-              <div key={key}>
-                <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 5,
-                  textTransform: "uppercase", letterSpacing: "0.08em" }}>{label}</div>
-                {type === "textarea"
-                  ? <textarea style={{ ...s.input, minHeight: 90, resize: "vertical", lineHeight: 1.6 }}
-                      value={qForm[key]} onChange={e => setQForm({ ...qForm, [key]: e.target.value })} />
-                  : <input style={s.input} value={qForm[key]}
-                      onChange={e => setQForm({ ...qForm, [key]: e.target.value })} />
-                }
-              </div>
-            ))}
-            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8 }}>
-              <div>
-                <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 5,
-                  textTransform: "uppercase", letterSpacing: "0.08em" }}>Category</div>
-                <select style={s.input} value={qForm.category}
-                  onChange={e => setQForm({ ...qForm, category: e.target.value })}>
-                  {Object.keys(CAT).map(c => <option key={c} value={c}>{c}</option>)}
-                </select>
-              </div>
-              <div>
-                <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 5,
-                  textTransform: "uppercase", letterSpacing: "0.08em" }}>Points</div>
-                <select style={s.input} value={qForm.points}
-                  onChange={e => setQForm({ ...qForm, points: Number(e.target.value) })}>
-                  <option value={100}>100 — Easy</option>
-                  <option value={200}>200 — Medium</option>
-                  <option value={300}>300 — Hard</option>
-                  <option value={400}>400 — Expert</option>
-                </select>
-              </div>
-            </div>
-            <button style={{ ...s.btn, marginTop: 4 }} onClick={saveManualQ}>
-              {saved ? "✓ Published!" : "Publish question"}
-            </button>
-          </div>
+            );
+            return <>
+              {renderQCard("Today's Question", estToday, slots[0].label, dayOfMonth, todayQ, true)}
+              {renderQCard("Tomorrow's Question", estTomorrow, tomorrowMonthLabel, tomorrowDay, tomorrowQ, false)}
+            </>;
+          })()}
         </div>
       )}
 
@@ -2339,6 +2276,13 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                         {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"].map(st => <option key={st} value={st}>{st}</option>)}
                       </select>
                     </div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 4,
+                      textTransform: "uppercase", letterSpacing: "0.08em" }}>Display name</div>
+                    <input style={s.input} value={editForm.displayName || ""} placeholder={u.username}
+                      onChange={e => setEditForm({ ...editForm, displayName: e.target.value })} />
+                    <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 4 }}>Shown on leaderboards. Leave blank to use the username.</div>
                   </div>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 4,
@@ -2414,6 +2358,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                       next[editForm.username] = { ...((o || {})[u.username] || u), ...editForm };
                       return next;
                     }, {});
+                    // Reflect the display name on the existing monthly leaderboard entry too
+                    await patchEntry(`leaderboard:${monthKey()}`, u.username, { displayName: editForm.displayName || "" });
                     setAdminUsers(merged);
                     setEditingUser(null); setUserSaved(true);
                     setTimeout(() => setUserSaved(false), 3000);
