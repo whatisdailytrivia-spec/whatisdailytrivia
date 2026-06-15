@@ -250,7 +250,8 @@ export default function App() {
     setLoading(true);
     // Clean up stale submission entries from previous days
     const today = todayKey();
-    Object.keys(localStorage).filter(k => k.startsWith("sub:") && !k.startsWith(`sub:${today}:`))
+    Object.keys(localStorage)
+      .filter(k => (k.startsWith("sub:") && !k.startsWith(`sub:${today}:`)) || (k.startsWith("start:") && !k.startsWith(`start:${today}:`)))
       .forEach(k => localStorage.removeItem(k));
     try {
       const [uR, qR, sR, lR] = await Promise.allSettled([
@@ -443,20 +444,27 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
-  const [viewStart] = useState(Date.now());
+  const [viewStart, setViewStart] = useState(null);  // set when they hit GO; persisted so the clock survives refresh
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState(null);
   const [submitting, setSubmitting] = useState(false);
   const answered = user && submissions[user.username];
+  const started = viewStart != null;
 
   // Instantly restore today's submission from localStorage (before DB responds)
   useEffect(() => {
     if (!user) return;
     const localKey = `sub:${todayKey()}:${user.username}`;
+    const startKey = `start:${todayKey()}:${user.username}`;
+    // Resume the answer clock if they already hit GO today (held across refresh)
+    const savedStart = localStorage.getItem(startKey);
+    if (savedStart) setViewStart(parseInt(savedStart, 10));
     // Check if admin has reset this user's submission
     apiStorage.get(`sub_reset:${todayKey()}:${user.username}`).then(r => {
       if (r) {
         localStorage.removeItem(localKey);
+        localStorage.removeItem(startKey);
+        setViewStart(null);
         apiStorage.delete(`sub_reset:${todayKey()}:${user.username}`).catch(() => {});
         setSubmissions(prev => { const n = { ...prev }; delete n[user.username]; return n; });
       } else {
@@ -474,15 +482,26 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     loadHistory(user.username);
   }, [user?.username]);
 
-  // Live elapsed ticker — stops once answered
+  // Live elapsed ticker — runs only after GO, stops once answered
   useEffect(() => {
-    if (answered || result) return;
+    if (answered || result || viewStart == null) return;
+    setElapsed(Math.round((Date.now() - viewStart) / 1000));
     const id = setInterval(() => setElapsed(Math.round((Date.now() - viewStart) / 1000)), 200);
     return () => clearInterval(id);
-  }, [answered, result]);
+  }, [answered, result, viewStart]);
 
   const loadHistory = async (username) => {
     try { const r = await apiStorage.get(`history:${username}`); if (r) setHistory(JSON.parse(r.value)); } catch (e) {}
+  };
+
+  // GO gate — reveal the question and start the answer clock. The start time is
+  // held from this first click (persisted), so it can't be reset by refreshing.
+  const startClock = () => {
+    if (!user || viewStart != null) return;
+    const now = Date.now();
+    localStorage.setItem(`start:${todayKey()}:${user.username}`, String(now));
+    setViewStart(now);
+    setElapsed(0);
   };
 
   const doAuth = async () => {
@@ -513,7 +532,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     const localKey = `sub:${todayKey()}:${user.username}`;
     if (localStorage.getItem(localKey) || submissions[user.username]) return;
     setSubmitting(true);
-    const responseTime = Math.round((Date.now() - viewStart) / 1000);
+    const responseTime = viewStart != null ? Math.round((Date.now() - viewStart) / 1000) : 0;
     const speedMult    = calcMultiplier(responseTime);
     const correct      = checkAnswer(answer, question.answer, question.aliases || []);
     const base         = (question && question.id !== "q1" && question.points) ? question.points : 0;
@@ -698,27 +717,46 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
           <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{question?.points || 200} pts</span>
         </div>
 
-        {/* Optional image */}
-        {question?.imageType === "map" && question?.numericCode && (
-          <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
-        )}
-        {question?.imageType === "flag" && question?.imageUrl && (
-          <div style={{ marginBottom: 14, textAlign: "center" }}>
-            <img src={question.imageUrl} alt={question.imageCaption || "Flag"}
-              style={{ maxWidth: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 6, display: "block", margin: "0 auto" }} />
-            {question.imageCaption && (
-              <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textAlign: "center", marginTop: 7, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                {question.imageCaption}
+        {(!answered && !result && !started) ? (
+          /* ── Ready · Set · GO gate ─────────────────── */
+          <div style={{ textAlign: "center", padding: "18px 8px 10px" }}>
+            <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.22em", marginBottom: 14 }}>Ready · Set</div>
+            <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1.4, marginBottom: 10 }}>
+              Today's question is locked in.
+            </div>
+            <div style={{ color: TEXT_SEC, fontSize: "0.84rem", lineHeight: 1.65, maxWidth: 420, margin: "0 auto 22px" }}>
+              Tap GO to reveal it. Your clock starts the instant you do — {GRACE_PERIOD}s of full credit, then the score drops {Math.round(DECAY_RATE * 100)}% per second down to a {Math.round(SCORE_FLOOR * 100)}% floor. It keeps running even if you leave, so only tap when you're ready to answer.
+            </div>
+            <button onClick={startClock}
+              style={{ background: GOLD, color: BLACK, border: "none", borderRadius: 100, padding: "14px 48px", fontFamily: SERIF, fontWeight: 700, fontSize: "1.35rem", letterSpacing: "0.06em", cursor: "pointer", boxShadow: "0 6px 20px rgba(201,168,76,0.35)" }}>
+              GO →
+            </button>
+          </div>
+        ) : (
+          <>
+            {/* Optional image */}
+            {question?.imageType === "map" && question?.numericCode && (
+              <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
+            )}
+            {question?.imageType === "flag" && question?.imageUrl && (
+              <div style={{ marginBottom: 14, textAlign: "center" }}>
+                <img src={question.imageUrl} alt={question.imageCaption || "Flag"}
+                  style={{ maxWidth: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 6, display: "block", margin: "0 auto" }} />
+                {question.imageCaption && (
+                  <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textAlign: "center", marginTop: 7, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                    {question.imageCaption}
+                  </div>
+                )}
               </div>
             )}
-          </div>
+
+            {/* Question text */}
+            <div style={{ ...s.h1, marginBottom: 18 }}>{question?.question}</div>
+          </>
         )}
 
-        {/* Question text */}
-        <div style={{ ...s.h1, marginBottom: 18 }}>{question?.question}</div>
-
         {/* ── Answer input (before submit) ──────────── */}
-        {!answered && !result && (() => {
+        {started && !answered && !result && (() => {
           const mult      = calcMultiplier(elapsed);
           const pct       = Math.round(mult * 100);
           const inGrace   = elapsed < GRACE_PERIOD;
