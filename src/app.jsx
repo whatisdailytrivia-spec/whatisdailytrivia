@@ -1888,6 +1888,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [backingUp, setBackingUp] = useState(false);
   const [analyticsSeries, setAnalyticsSeries] = useState([]);   // durable daily rollups, oldest→newest
   const [analyticsRange, setAnalyticsRange]   = useState("All"); // 30D | 90D | All
+  const [perfCat, setPerfCat]   = useState("All"); // category filter for difficulty cross-tab
+  const [perfDiff, setPerfDiff] = useState("All"); // difficulty filter for cross-tab
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -1990,14 +1992,22 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       let cur = startDate, guard = 0;
       while (cur <= yesterday && guard < 800) { if (!have.has(cur)) need.push(cur); cur = addDays(cur, 1); guard++; }
 
+      // Legacy entries missing category/points get re-derived from archive
+      const patchDates = series.filter(p => p.points == null || p.category == null).map(p => p.date);
+      const archiveDates = [...new Set([...need, ...patchDates])];
+      const arcMap = {};
+      if (archiveDates.length) {
+        const arcResults = await Promise.allSettled(archiveDates.map(d => apiStorage.get(`archive:${d}`)));
+        archiveDates.forEach((d, i) => { if (arcResults[i].status === "fulfilled" && arcResults[i].value) { try { arcMap[d] = JSON.parse(arcResults[i].value.value) || {}; } catch(e) {} } });
+      }
+
+      let changed = false;
       if (need.length) {
         const subResults = await Promise.allSettled(need.map(d => apiStorage.get(`submissions:${d}`)));
-        const arcResults = await Promise.allSettled(need.map(d => apiStorage.get(`archive:${d}`)));
         need.forEach((d, i) => {
           let subs = {}; const sr = subResults[i];
           if (sr.status === "fulfilled" && sr.value) { try { subs = JSON.parse(sr.value.value) || {}; } catch(e) {} }
-          let cat = null; const ar = arcResults[i];
-          if (ar.status === "fulfilled" && ar.value) { try { cat = (JSON.parse(ar.value.value) || {}).category || null; } catch(e) {} }
+          const arc = arcMap[d] || {};
           const arr = Object.values(subs);
           const answers = arr.length;
           const correct = arr.filter(x => x && x.isCorrect).length;
@@ -2005,9 +2015,21 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             date: d,
             totalAccounts: users.filter(u => u.joined && u.joined <= d).length,
             newAccounts: users.filter(u => u.joined === d).length,
-            activeUsers: answers, answers, correct, category: cat,
+            activeUsers: answers, answers, correct,
+            category: arc.category || null,
+            points: arc.points != null ? arc.points : null,
           });
         });
+        changed = true;
+      }
+      // Patch legacy entries
+      series.forEach(p => {
+        const arc = arcMap[p.date];
+        if (!arc) return;
+        if (p.category == null && arc.category != null) { p.category = arc.category; changed = true; }
+        if (p.points == null && arc.points != null) { p.points = arc.points; changed = true; }
+      });
+      if (changed) {
         series.sort((a, b) => a.date.localeCompare(b.date));
         await apiStorage.set("analytics_series", JSON.stringify(series));
       }
@@ -2250,10 +2272,26 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const todaysAnswers = Object.keys(adminSubmissions || {}).length;
         const todaysCorrect = Object.values(adminSubmissions || {}).filter(x => x && x.isCorrect).length;
         const histSeries = (analyticsSeries || []).filter(p => p.date < today);
-        const mergedSeries = [...histSeries, { date: today, totalAccounts: totalUsers, newAccounts: newToday, activeUsers: dau, answers: todaysAnswers, correct: todaysCorrect, _today: true }];
+        const mergedSeries = [...histSeries, { date: today, totalAccounts: totalUsers, newAccounts: newToday, activeUsers: todaysAnswers, answers: todaysAnswers, correct: todaysCorrect, category: (question?.category || todayQ?.category || null), points: (question?.points != null ? question.points : (todayQ?.points != null ? todayQ.points : null)), _today: true }];
         const rangeN = analyticsRange === "30D" ? 30 : analyticsRange === "90D" ? 90 : 9999;
         const viewSeries = mergedSeries.slice(-rangeN);
         const hasHistory = viewSeries.length >= 2;
+
+        // ── Difficulty & category×difficulty cross-tab (from durable series) ──
+        const PT_LABEL = { 100: "Easy", 200: "Medium", 300: "Hard", 400: "Expert" };
+        const PT_COLOR = { 100: "#4CAF7D", 200: "#6495ED", 300: GOLD, 400: "#E05C5C" };
+        const PT_TIERS = [100, 200, 300, 400];
+        const perfDays = mergedSeries.filter(p => p.category && p.points && p.answers > 0);
+        const catsPresent = [...new Set(perfDays.map(p => p.category))];
+        const orderedCats = Object.keys(CAT).filter(c => catsPresent.includes(c)).concat(catsPresent.filter(c => !CAT[c]));
+        const aggBy = (catFilter, ptFilter) => perfDays.reduce((o, p) => {
+          if (catFilter !== "All" && p.category !== catFilter) return o;
+          if (ptFilter !== "All" && p.points !== ptFilter) return o;
+          o.answered += p.answers; o.correct += p.correct; return o;
+        }, { answered: 0, correct: 0 });
+        const diffRows = PT_TIERS.map(pt => { const a = aggBy("All", pt); return { pt, answered: a.answered, correct: a.correct, acc: a.answered ? Math.round((a.correct / a.answered) * 100) : null }; });
+        const sel = aggBy(perfCat, perfDiff);
+        const selAcc = sel.answered ? Math.round((sel.correct / sel.answered) * 100) : null;
 
         const LineChart = ({ data, accessor, color }) => {
           const W = 100, H = 32;
@@ -2313,43 +2351,41 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} last={`${totalUsers} total`} />
 
             {/* ===== USER ENGAGEMENT ===== */}
-            {secHead("User Engagement", "How often and how deeply players come back")}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
-              <Stat v={dau} l="Daily active" gold />
-              <Stat v={wau} l="Weekly active" />
-              <Stat v={mau} l="Monthly active" />
-              <Stat v={`${stickiness}%`} l="Stickiness · DAU/MAU" gold />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 8 }}>
-              <Stat v={totalAnswers.toLocaleString()} l="Total answers" />
-              <Stat v={avgPerUser.toFixed(1)} l="Answers / account" />
-              <Stat v={`${activation}%`} l="Activation" sub={`${playedAny.length}/${totalUsers} played ≥ once`} />
-              <Stat v={maxStreak} l="Longest streak 🔥" sub={`${onStreak} on a 3+ streak`} />
-            </div>
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 8 }}>
-              <Stat v={`${returnRate}%`} l="Returning · 2+ days" sub={`${returning}/${playedAny.length} who played`} />
-              <Stat v={`${ret7Rate}%`} l="7-day retention" sub={`of ${olderThan7.length} older accts`} />
-              <Stat v={dormant} l="Signed up · never played" />
-              <Stat v={playedAny.length} l="Have played" />
-            </div>
-            <div style={panel}>
-              <div style={chartTitle}>Daily active users · last 14 days</div>
-              <Bars data={dauSeries} color="#4CAF7D" />
-            </div>
-            <Trend title="Daily active users · full history" color="#4CAF7D" accessor={p => p.activeUsers || 0} last={`${dau} today`} />
-            <div style={{ ...panel, padding: "13px 15px" }}>
-              <div style={{ ...chartTitle, marginBottom: 10 }}>Engagement depth · days played per active account</div>
-              {[{ l: "1 day only", v: depth.one, c: "#E05C5C" }, { l: "2–5 days", v: depth.few, c: GOLD }, { l: "6+ days", v: depth.many, c: "#4CAF7D" }].map(row => {
-                const mx = Math.max(1, depth.one, depth.few, depth.many); const pct = Math.round((row.v / mx) * 100);
-                return (
-                  <div key={row.l} style={{ display: "grid", gridTemplateColumns: "84px 1fr 30px", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                    <div style={{ fontSize: "0.74rem", color: TEXT_SEC }}>{row.l}</div>
-                    <div style={{ background: SURFACE2, borderRadius: 100, height: 7, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: row.c, borderRadius: 100 }} /></div>
-                    <div style={{ ...s.mono, fontSize: "0.7rem", color: OFF_WHITE, textAlign: "right" }}>{row.v}</div>
+            {secHead("User Engagement", "How many accounts play each day vs. the total")}
+            {(() => {
+              const partToday = totalUsers ? Math.round((todaysAnswers / totalUsers) * 100) : 0;
+              return (
+                <div>
+                  <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Answered today</div>
+                      <div style={{ fontFamily: SERIF, fontSize: "2rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{todaysAnswers}<span style={{ color: TEXT_MUTED, fontSize: "1.1rem" }}> / {totalUsers}</span></div>
+                      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_SEC, marginTop: 7 }}>accounts answered today</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: SERIF, fontSize: "2.6rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{partToday}%</div>
+                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 5 }}>Daily participation</div>
+                    </div>
                   </div>
-                );
-              })}
-            </div>
+                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.totalAccounts ? Math.round((p.activeUsers / p.totalAccounts) * 100) : 0} last={`${partToday}% today`} />
+                  <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
+                    {[
+                      [`${wau}`, "Active · 7d"],
+                      [`${mau}`, "Active · 30d"],
+                      [`${stickiness}%`, "Stickiness"],
+                      [avgPerUser.toFixed(1), "Answers / acct"],
+                      [`${playedAny.length}/${totalUsers}`, "Ever played"],
+                      [`${dormant}`, "Never played"],
+                    ].map(([v, l], i) => (
+                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                        <span style={{ ...s.mono, fontSize: "0.88rem", fontWeight: 600, color: OFF_WHITE }}>{v}</span>
+                        <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}</span>
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ===== USER PERFORMANCE ===== */}
             {secHead("User Performance", "How players do on the questions themselves")}
@@ -2376,6 +2412,64 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     </div>
                   ); })}
                 </div>
+                <div style={subTitle}>Accuracy by difficulty</div>
+                <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "14px 15px" }}>
+                  {diffRows.map(r => (
+                    <div key={r.pt} style={{ display: "grid", gridTemplateColumns: "120px 1fr 96px", alignItems: "center", gap: 10, marginBottom: 9 }}>
+                      <div style={{ fontSize: "0.76rem", color: PT_COLOR[r.pt], fontWeight: 500 }}>{PT_LABEL[r.pt]} <span style={{ color: TEXT_MUTED, fontWeight: 400 }}>· {r.pt}</span></div>
+                      <div style={{ background: SURFACE2, borderRadius: 100, height: 8, overflow: "hidden" }}><div style={{ width: `${r.acc || 0}%`, height: "100%", background: PT_COLOR[r.pt], borderRadius: 100 }} /></div>
+                      <div style={{ ...s.mono, fontSize: "0.64rem", color: TEXT_SEC, textAlign: "right" }}>{r.acc != null ? <><span style={{ color: accColor(r.acc), fontWeight: 600 }}>{r.acc}%</span> · {r.correct}/{r.answered}</> : "—"}</div>
+                    </div>
+                  ))}
+                </div>
+
+                <div style={subTitle}>Category × difficulty</div>
+                <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "14px 15px" }}>
+                  <div style={{ ...s.mono, fontSize: "0.57rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Category</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 13 }}>
+                    {["All", ...orderedCats].map(c => {
+                      const on = perfCat === c; const col = c === "All" ? GOLD : (CAT[c] || CAT.Wildcard).text;
+                      return <button key={c} onClick={() => setPerfCat(c)} style={{ padding: "4px 11px", borderRadius: 100, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: `1px solid ${on ? col : SURFACE3}`, background: on ? `${col}22` : "transparent", color: on ? col : TEXT_SEC }}>{c}</button>;
+                    })}
+                  </div>
+                  <div style={{ ...s.mono, fontSize: "0.57rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Difficulty</div>
+                  <div style={{ display: "flex", flexWrap: "wrap", gap: 5, marginBottom: 14 }}>
+                    {["All", ...PT_TIERS].map(pt => {
+                      const on = perfDiff === pt; const col = pt === "All" ? GOLD : PT_COLOR[pt]; const lab = pt === "All" ? "All" : `${PT_LABEL[pt]} · ${pt}`;
+                      return <button key={pt} onClick={() => setPerfDiff(pt)} style={{ padding: "4px 11px", borderRadius: 100, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: `1px solid ${on ? col : SURFACE3}`, background: on ? `${col}22` : "transparent", color: on ? col : TEXT_SEC }}>{lab}</button>;
+                    })}
+                  </div>
+                  <div style={{ display: "flex", alignItems: "baseline", justifyContent: "space-between", padding: "13px 15px", borderRadius: 8, background: SURFACE2, border: `1px solid ${SURFACE3}` }}>
+                    <div style={{ fontSize: "0.82rem", color: TEXT_SEC }}>
+                      {perfDiff === "All" ? "" : `${PT_LABEL[perfDiff]} `}<span style={{ color: perfCat === "All" ? OFF_WHITE : (CAT[perfCat] || CAT.Wildcard).text, fontWeight: 600 }}>{perfCat === "All" ? "all categories" : perfCat}</span>
+                    </div>
+                    {selAcc != null
+                      ? <div style={{ ...s.mono, fontSize: "1rem", fontWeight: 700, color: accColor(selAcc) }}>{selAcc}% <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, fontWeight: 400 }}>· {sel.correct}/{sel.answered}</span></div>
+                      : <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED }}>No data yet</div>}
+                  </div>
+                </div>
+
+                <div style={subTitle}>Full cross-tab · accuracy heatmap</div>
+                <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px", overflowX: "auto" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "minmax(82px,1fr) repeat(4, 54px)", gap: 4, minWidth: 300 }}>
+                    {[<div key="corner" />, ...PT_TIERS.map(pt => <div key={`h${pt}`} style={{ ...s.mono, fontSize: "0.55rem", color: PT_COLOR[pt], textTransform: "uppercase", textAlign: "center", fontWeight: 600, alignSelf: "end", paddingBottom: 2 }}>{PT_LABEL[pt]}</div>),
+                      ...orderedCats.flatMap(c => [
+                        <div key={`${c}-l`} style={{ fontSize: "0.7rem", color: (CAT[c] || CAT.Wildcard).text, fontWeight: 500, display: "flex", alignItems: "center" }}>{c}</div>,
+                        ...PT_TIERS.map(pt => {
+                          const a = aggBy(c, pt); const acc = a.answered ? Math.round((a.correct / a.answered) * 100) : null;
+                          const on = perfCat === c && perfDiff === pt;
+                          return (
+                            <div key={`${c}-${pt}`} onClick={() => { setPerfCat(c); setPerfDiff(pt); }} title={a.answered ? `${c} · ${PT_LABEL[pt]}: ${a.correct}/${a.answered}` : "No data"} style={{ cursor: "pointer", borderRadius: 5, padding: "8px 2px", textAlign: "center", background: acc == null ? SURFACE2 : `${accColor(acc)}22`, border: `1px solid ${on ? GOLD : "transparent"}` }}>
+                              <div style={{ ...s.mono, fontSize: "0.64rem", fontWeight: 600, color: acc == null ? TEXT_MUTED : accColor(acc) }}>{acc == null ? "—" : `${acc}%`}</div>
+                              <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, marginTop: 1 }}>{a.answered || ""}</div>
+                            </div>
+                          );
+                        }),
+                      ])]}
+                  </div>
+                  <div style={{ ...s.mono, fontSize: "0.55rem", color: TEXT_MUTED, marginTop: 8 }}>Tap any cell to load it into the filter above · small number = answers counted</div>
+                </div>
+
                 <div style={subTitle}>Recent questions · how players did</div>
                 <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, overflow: "hidden" }}>
                   <div style={{ display: "grid", gridTemplateColumns: "62px 1fr 52px 56px 48px", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${SURFACE3}` }}>
