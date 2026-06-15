@@ -1888,6 +1888,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     }
                     // Set reset flag so their localStorage gets cleared on next load
                     await apiStorage.set(`sub_reset:${dateKey}:${u.username}`, "1");
+                    // Clear locally so the panel updates immediately
+                    setAdminSubmissions(prev => { const n = { ...prev }; delete n[u.username]; return n; });
                     setUserSaved(true);
                     setTimeout(() => setUserSaved(false), 3000);
                   }}>↺ Reset today's submission</button>
