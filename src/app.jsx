@@ -167,6 +167,10 @@ export default function App() {
 
   const loadAll = async () => {
     setLoading(true);
+    // Clean up stale submission entries from previous days
+    const today = todayKey();
+    Object.keys(localStorage).filter(k => k.startsWith("sub:") && !k.startsWith(`sub:${today}:`))
+      .forEach(k => localStorage.removeItem(k));
     try {
       const [uR, qR, sR, lR] = await Promise.allSettled([
         apiStorage.get("users"), apiStorage.get(`question:${todayKey()}`),
@@ -325,9 +329,19 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
   const [viewStart] = useState(Date.now());
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState(null);
+  const [submitting, setSubmitting] = useState(false);
   const answered = user && submissions[user.username];
 
-  useEffect(() => { if (user) loadHistory(user.username); }, [user?.username]);
+  // Instantly restore today's submission from localStorage (before DB responds)
+  useEffect(() => {
+    if (!user) return;
+    const localKey = `sub:${todayKey()}:${user.username}`;
+    const local = localStorage.getItem(localKey);
+    if (local && !submissions[user.username]) {
+      try { setSubmissions(prev => ({ ...prev, [user.username]: JSON.parse(local) })); } catch(e) {}
+    }
+    loadHistory(user.username);
+  }, [user?.username]);
 
   // Live elapsed ticker — stops once answered
   useEffect(() => {
@@ -357,7 +371,11 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
   };
 
   const submit = async () => {
-    if (!answer.trim()) return;
+    if (!answer.trim() || submitting) return;
+    // Hard guard — check both localStorage and DB state before proceeding
+    const localKey = `sub:${todayKey()}:${user.username}`;
+    if (localStorage.getItem(localKey) || submissions[user.username]) return;
+    setSubmitting(true);
     const responseTime = Math.round((Date.now() - viewStart) / 1000);
     const speedMult    = calcMultiplier(responseTime);
     const correct      = checkAnswer(answer, question.answer, question.aliases || []);
@@ -370,6 +388,8 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
       time: new Date().toISOString(), responseTime };
     const newSubs = { ...submissions, [user.username]: sub };
     setSubmissions(newSubs);
+    // Save to localStorage immediately — this is the primary guard on return visits
+    localStorage.setItem(`sub:${todayKey()}:${user.username}`, JSON.stringify(sub));
     await apiStorage.set(`submissions:${todayKey()}`, JSON.stringify(newSubs));
     const streak = correct ? (user.streak || 0) + 1 : 0;
     const nu = { ...user, streak };
@@ -436,9 +456,17 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
     setHistory(updatedHistory);
     await apiStorage.set(`history:${user.username}`, JSON.stringify(updatedHistory));
     setResult(sub);
+    setSubmitting(false);
   };
 
   const cat = CAT[question?.category] || CAT.Wildcard;
+
+  // Pre-window: between user's local midnight and 6am EST, no real question is live yet
+  const hasRealQuestion = question && question.id !== "q1";
+  const estHour = parseInt(new Intl.DateTimeFormat("en-US", {
+    timeZone: "America/New_York", hour: "numeric", hour12: false,
+  }).format(new Date()), 10);
+  const isPreWindow = user && !hasRealQuestion && estHour < 6;
 
   if (!user) return (
     <div>
@@ -468,6 +496,24 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
           )}
           {error && <div style={{ color: "#E05C5C", fontSize: "0.82rem" }}>{error}</div>}
           <button style={{ ...s.btn, width: "100%", marginTop: 4 }} onClick={doAuth}>{authMode === "login" ? "Sign in" : "Create account"}</button>
+        </div>
+      </div>
+    </div>
+  );
+
+  if (isPreWindow) return (
+    <div style={{ textAlign: "center", padding: "60px 0" }}>
+      <div style={{ fontSize: "2.8rem", marginBottom: 20 }}>🌙</div>
+      <div style={{ fontFamily: SERIF, fontSize: "1.4rem", fontWeight: 700, color: OFF_WHITE, marginBottom: 10 }}>
+        Tonight's question is resting.
+      </div>
+      <div style={{ color: TEXT_SEC, fontSize: "0.88rem", lineHeight: 1.7, marginBottom: 28 }}>
+        Come back at <span style={{ color: GOLD, fontWeight: 600 }}>6:00 AM EST</span> for tomorrow's question.
+      </div>
+      <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, display: "inline-block", padding: "14px 28px" }}>
+        <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 5 }}>Next question</div>
+        <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: GOLD }}>
+          {new Date(new Date().toLocaleDateString("en-US", { timeZone: "America/New_York" }) + " 06:00:00 EST").toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })} · 6:00 AM EST
         </div>
       </div>
     </div>
@@ -801,7 +847,7 @@ function ArchiveTab() {
 
   const formatDate = (d) => {
     const date = new Date(d + "T00:00:00");
-    return date.toLocaleDateString("en-US", { weekday: "short", month: "short", day: "numeric", year: "numeric" });
+    return date.toLocaleDateString("en-US", { weekday: "short", month: "long", day: "numeric", year: "numeric" });
   };
 
   if (loading) return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "40px 0", textAlign: "center" }}>Loading archive...</div>;
@@ -1026,7 +1072,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
           </div>
         )}
 
-        <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 16 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long" })}</div>
+        <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 16 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
 
         {/* Invite code */}
         <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: "11px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
@@ -1815,7 +1861,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             if (!q || !q.question || q.answer === "N/A" || q.question === "Past question — not published.") continue;
             const d = new Date(yr, mo - 1, day);
             items.push({
-              dateStr: `${String(mo).padStart(2,"0")}/${String(day).padStart(2,"0")}/${yr}`,
+              dateStr: new Date(yr, mo - 1, day).toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" }),
               dayName: d.toLocaleDateString("en-US", { weekday: "short" }),
               monthLabel: label, monthKey: key, ...q
             });
