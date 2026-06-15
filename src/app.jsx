@@ -114,6 +114,19 @@ const mutateGroupMembers = (key, fn) =>
   mergeWrite(key, (g) => (g ? { ...g, members: fn(Array.isArray(g.members) ? g.members : []) } : g), null);
 
 const ADMIN_PASSWORD = "whatis2026";
+
+// Accounts that play daily but never appear on or affect any leaderboard
+// (e.g. the question writer). Matched case-insensitively.
+const EXCLUDED_USERS = ["tommyf10"];
+const isExcludedUser = (u) => EXCLUDED_USERS.includes((u || "").toLowerCase());
+// Split a board into ranked real players (by points) and host rows pinned to
+// the bottom. Hosts are shown with answered/correct but no score.
+const orderBoard = (lb) => {
+  const arr   = lb || [];
+  const real  = arr.filter(e => !isExcludedUser(e.username)).slice().sort((a, b) => b.points - a.points);
+  const hosts = arr.filter(e => isExcludedUser(e.username));
+  return { real, hosts };
+};
 const GOLD = "#C9A84C";
 const BLACK = "#0A0A0A";
 const OFF_WHITE = "#F5F3EE";
@@ -502,8 +515,11 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     const correct      = checkAnswer(answer, question.answer, question.aliases || []);
     const base         = (question && question.id !== "q1" && question.points) ? question.points : 0;
     const pts          = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
-    const globalCorrectCount = Object.values(submissions).filter(s => s.isCorrect).length;
-    const globalMedal  = correct ? getMedal(globalCorrectCount) : null; // cosmetic only
+    const excluded     = isExcludedUser(user.username);
+    // Excluded users (question writers) don't occupy a medal slot, so real
+    // players' first/second/third ordering ignores them entirely.
+    const globalCorrectCount = Object.entries(submissions).filter(([u, sb]) => sb.isCorrect && !isExcludedUser(u)).length;
+    const globalMedal  = (correct && !excluded) ? getMedal(globalCorrectCount) : null; // cosmetic only
     const sub = { answer, isCorrect: correct, points: pts, basePoints: base,
       speedMult: Math.round(speedMult * 100), medal: globalMedal,
       time: new Date().toISOString(), responseTime };
@@ -519,8 +535,8 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     const ex = leaderboard.find(e => e.username === user.username);
     const medalUpdate = globalMedal ? { [`${globalMedal}Corrects`]: ((ex?.[`${globalMedal}Corrects`] || 0) + 1) } : {};
     const entry = ex
-      ? { ...ex, points: ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1, ...medalUpdate }
-      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate };
+      ? { ...ex, points: excluded ? 0 : ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1, ...medalUpdate }
+      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate };
     await saveLBEntry(entry);
 
     // Update archive with gold winner
@@ -534,22 +550,22 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       } catch (e) {}
     }
 
-    // Group leaderboards
+    // Group leaderboards — host still shows at the bottom with 0 points
     const userGroups = user.groups || [];
     for (const code of userGroups) {
       try {
         const gsubR = await apiStorage.get(`groupsub:${code}:${todayKey()}`).catch(() => null);
         const gsub = gsubR ? JSON.parse(gsubR.value) : [];
-        const groupMedal = correct ? getMedal(gsub.length) : null;
+        const groupMedal = (correct && !excluded) ? getMedal(gsub.length) : null;
         const groupBonus = correct && groupMedal ? Math.round(base * MEDAL[groupMedal].multiplier) : 0;
-        const groupPts = correct ? base + groupBonus : 0;
-        if (correct) await appendUnique(`groupsub:${code}:${todayKey()}`, user.username);
+        const groupPts = excluded ? 0 : (correct ? base + groupBonus : 0);
+        if (correct && !excluded) await appendUnique(`groupsub:${code}:${todayKey()}`, user.username);
         const gR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
         let glb = gR ? JSON.parse(gR.value) : [];
         const gex = glb.find(e => e.username === user.username);
         const gMedalUpdate = groupMedal ? { [`${groupMedal}Corrects`]: ((gex?.[`${groupMedal}Corrects`] || 0) + 1) } : {};
         const gentry = gex
-          ? { ...gex, points: gex.points + groupPts, correct: gex.correct + (correct ? 1 : 0), streak, answered: gex.answered + 1, ...gMedalUpdate }
+          ? { ...gex, points: excluded ? 0 : gex.points + groupPts, correct: gex.correct + (correct ? 1 : 0), streak, answered: gex.answered + 1, ...gMedalUpdate }
           : { username: user.username, state: user.state || "", points: groupPts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...gMedalUpdate };
         await upsertEntry(`grouplb:${code}:${monthKey()}`, gentry);
       } catch (e) {}
@@ -660,7 +676,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
         </div>
         <div style={{ textAlign: "right" }}>
           <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, marginBottom: 5 }}>
-            # of Players: <span style={{ color: OFF_WHITE, fontWeight: 600 }}>{leaderboard.length}</span>
+            # of Players: <span style={{ color: OFF_WHITE, fontWeight: 600 }}>{orderBoard(leaderboard).real.length}</span>
           </div>
           <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC }}>
             This Month's Prize: <span style={{ color: GOLD, fontWeight: 600 }}>$100</span>
@@ -770,28 +786,38 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
 
             <hr style={s.divider} />
       <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 12 }}>Top 5 this month</div>
-      {leaderboard.length === 0
-        ? <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>
-        : leaderboard.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)
-      }
+      {(() => {
+        const { real, hosts } = orderBoard(leaderboard);
+        if (real.length === 0 && hosts.length === 0)
+          return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
+        return <>
+          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} />)}
+        </>;
+      })()}
     </div>
   );
 }
 
-function LBRow({ entry, rank, isMe }) {
+function LBRow({ entry, rank, isMe, host }) {
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   return (
-    <div style={{ ...s.lbRow, border: `1px solid ${rank === 1 ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}` }}>
-      <div style={{ ...s.mono, fontSize: "0.8rem", color: rank <= 3 ? GOLD : TEXT_MUTED, textAlign: "center" }}>{medals[rank] || rank}</div>
+    <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
+      <div style={{ ...s.mono, fontSize: "0.8rem", color: (!host && rank <= 3) ? GOLD : TEXT_MUTED, textAlign: "center" }}>{host ? "—" : (medals[rank] || rank)}</div>
       <div>
         <div style={{ fontWeight: 500, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {entry.displayName || entry.username}
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
+          {host && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "1px 7px", letterSpacing: "0.08em" }}>HOST</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
         </div>
-        <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>🔥{entry.streak || 0} · {entry.correct || 0}/{entry.answered || 0} correct</div>
+        <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>
+          {host
+            ? `${entry.correct || 0}/${entry.answered || 0} correct`
+            : `🔥${entry.streak || 0} · ${entry.correct || 0}/${entry.answered || 0} correct`}
+        </div>
       </div>
-      <div style={{ ...s.mono, fontSize: "0.85rem", fontWeight: 500, color: GOLD }}>{entry.points} pts</div>
+      <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD }}>{host ? "—" : `${entry.points} pts`}</div>
     </div>
   );
 }
@@ -905,10 +931,15 @@ function LeaderboardTab({ leaderboard, user }) {
           <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", marginTop: 3 }}>Days left</div>
         </div>
       </div>
-      {leaderboard.length === 0
-        ? <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>
-        : leaderboard.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)
-      }
+      {(() => {
+        const { real, hosts } = orderBoard(leaderboard);
+        if (real.length === 0 && hosts.length === 0)
+          return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
+        return <>
+          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} />)}
+        </>;
+      })()}
     </div>
   );
 }
@@ -1174,10 +1205,15 @@ function GroupsTab({ user, setUser, saveUser, users }) {
         </div>
 
         {/* Leaderboard */}
-        {lb.length === 0
-          ? <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>
-          : lb.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} />)
-        }
+        {(() => {
+          const { real, hosts } = orderBoard(lb);
+          if (real.length === 0 && hosts.length === 0)
+            return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>;
+          return <>
+            {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} />)}
+            {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} />)}
+          </>;
+        })()}
 
         {/* Leave group */}
         <div style={{ marginTop: 28, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
