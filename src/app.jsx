@@ -825,8 +825,8 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
           <LBHeader />
-          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
-          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
     </div>
@@ -844,7 +844,7 @@ function LBHeader() {
   );
 }
 
-function LBRow({ entry, rank, isMe, host, answeredToday }) {
+function LBRow({ entry, rank, isMe, host, todayStatus }) {
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   return (
     <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
@@ -863,9 +863,11 @@ function LBRow({ entry, rank, isMe, host, answeredToday }) {
         </div>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
-        {answeredToday
-          ? <span title="Answered today's question" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "rgba(76,175,125,0.18)", border: "1px solid rgba(76,175,125,0.55)", color: "#4CAF7D", fontSize: "0.68rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
-          : <span title="Hasn't answered yet today" style={{ display: "inline-flex", width: 18, height: 18, borderRadius: "50%", border: `1px solid ${SURFACE3}`, flexShrink: 0 }} />}
+        {todayStatus === "correct"
+          ? <span title="Answered correctly today" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "rgba(76,175,125,0.1)", border: "1px solid rgba(76,175,125,0.35)", color: "#4CAF7D", fontSize: "0.55rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
+          : todayStatus === "wrong"
+          ? <span title="Answered incorrectly today" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 14, height: 14, borderRadius: "50%", background: "rgba(224,92,92,0.1)", border: "1px solid rgba(224,92,92,0.35)", color: "#E05C5C", fontSize: "0.57rem", lineHeight: 1, flexShrink: 0 }}>✗</span>
+          : <span style={{ display: "inline-flex", width: 14, height: 14, flexShrink: 0 }} />}
       </div>
       <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD, textAlign: "right" }}>{host ? "—" : `${entry.points} pts`}</div>
     </div>
@@ -1001,8 +1003,8 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
           return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
         return <>
           <LBHeader />
-          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
-          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
     </div>
@@ -1276,8 +1278,8 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
             return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>;
           return <>
             <LBHeader />
-            {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
-            {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+            {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+            {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
           </>;
         })()}
 
