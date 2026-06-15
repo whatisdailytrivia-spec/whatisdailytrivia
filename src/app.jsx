@@ -1066,9 +1066,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
         ) : (
           <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 4 }}>
             <div style={s.h2}>{g.name}</div>
-            {isCreator && (
-              <button onClick={() => { setNewGroupName(g.name); setRenaming(true); }} style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.8rem", padding: "2px 6px", marginBottom: 10 }}>✎ rename</button>
-            )}
+            <button onClick={() => { setNewGroupName(g.name); setRenaming(true); }} style={{ background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.8rem", padding: "2px 6px", marginBottom: 10 }}>✎ rename</button>
           </div>
         )}
 
