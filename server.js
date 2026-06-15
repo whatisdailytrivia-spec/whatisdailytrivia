@@ -6,95 +6,93 @@ const app     = express();
 app.use(express.json());
 app.use(express.static(path.join(__dirname, "build")));
 
-const DB_URL = process.env.REPLIT_DB_URL;
-if (!DB_URL) console.error("REPLIT_DB_URL not found.");
+// ─── Upstash Redis helpers ────────────────────────────────────────────────────
 
-// ─── Replit DB helpers ────────────────────────────────────────────────────────
+const UPSTASH_URL   = process.env.UPSTASH_REDIS_REST_URL;
+const UPSTASH_TOKEN = process.env.UPSTASH_REDIS_REST_TOKEN;
+
+if (!UPSTASH_URL || !UPSTASH_TOKEN) {
+  console.error("Missing UPSTASH_REDIS_REST_URL or UPSTASH_REDIS_REST_TOKEN");
+}
+
+const redis = async (cmd) => {
+  const res = await fetch(UPSTASH_URL, {
+    method: "POST",
+    headers: {
+      Authorization: `Bearer ${UPSTASH_TOKEN}`,
+      "Content-Type": "application/json",
+    },
+    body: JSON.stringify(cmd),
+  });
+  const data = await res.json();
+  if (data.error) throw new Error(data.error);
+  return data.result;
+};
 
 const dbGet = async (key) => {
-  const res = await fetch(`${DB_URL}/${encodeURIComponent(key)}`);
-  if (res.status === 404) return null;
-  return res.text();
+  const result = await redis(["GET", key]);
+  return result === null ? null : result;
 };
 
 const dbSet = async (key, value) => {
-  await fetch(DB_URL, {
-    method: "POST",
-    headers: { "Content-Type": "application/x-www-form-urlencoded" },
-    body: `${encodeURIComponent(key)}=${encodeURIComponent(value)}`,
-  });
+  await redis(["SET", key, value]);
 };
 
 const dbDelete = async (key) => {
-  await fetch(`${DB_URL}/${encodeURIComponent(key)}`, { method: "DELETE" });
+  await redis(["DEL", key]);
 };
 
 const dbList = async (prefix = "") => {
-  const res  = await fetch(`${DB_URL}?prefix=${encodeURIComponent(prefix)}&encode=true`);
-  const text = await res.text();
-  return text.split("\n").filter(Boolean).map(decodeURIComponent);
+  const pattern = prefix ? `${prefix}*` : "*";
+  const keys = [];
+  let cursor = "0";
+  do {
+    const result = await redis(["SCAN", cursor, "MATCH", pattern, "COUNT", "200"]);
+    cursor = String(result[0]);
+    if (result[1] && result[1].length) keys.push(...result[1]);
+  } while (cursor !== "0");
+  return keys;
 };
 
-// ─── Date helpers (always EST / America/New_York) ─────────────────────────────
+// ─── Date helpers (always EST) ────────────────────────────────────────────────
 
 const getESTDate = () =>
   new Intl.DateTimeFormat("en-CA", {
     timeZone: "America/New_York",
     year: "numeric", month: "2-digit", day: "2-digit",
-  }).format(new Date()); // → "2026-06-15"
+  }).format(new Date());
 
-const getESTMonthKey = () => getESTDate().slice(0, 7); // → "2026-06"
+const getESTMonthKey = () => getESTDate().slice(0, 7);
 
-// ─── Daily cron — 6:00 AM Eastern, every day ─────────────────────────────────
-// Publishes today's question from the monthly bank (or manual override).
+// ─── Daily cron — 6:00 AM Eastern ────────────────────────────────────────────
 
 cron.schedule("0 6 * * *", async () => {
   const dateStr  = getESTDate();
   const monthKey = getESTMonthKey();
   const dayNum   = parseInt(dateStr.slice(8), 10);
-
-  console.log(`[CRON daily] Running for ${dateStr} (day ${dayNum} of ${monthKey})`);
-
+  console.log(`[CRON daily] Running for ${dateStr} (day ${dayNum})`);
   try {
-    // 1. Manual override takes priority
     const override = await dbGet(`qoverride:${dateStr}`);
     if (override) {
       await dbSet(`question:${dateStr}`, override);
       await updateArchive(dateStr, JSON.parse(override));
       await dbDelete("cron_alert");
-      console.log(`[CRON daily] Published manual override for ${dateStr}`);
-      return;
+      return console.log(`[CRON daily] Published override for ${dateStr}`);
     }
-
-    // 2. Pull from monthly bank
     const bankRaw = await dbGet(`question_bank:${monthKey}`);
-    if (!bankRaw) {
-      await setCronAlert("no_bank", `No question bank loaded for ${monthKey}`, dateStr);
-      return;
-    }
-
+    if (!bankRaw) return await setCronAlert("no_bank", `No bank for ${monthKey}`, dateStr);
     const bank     = JSON.parse(bankRaw);
     const question = bank[dayNum - 1];
-
     if (!question || !question.question || question.answer === "N/A" ||
-        question.question === "Past question — not published.") {
-      await setCronAlert("no_question", `No valid question at index ${dayNum - 1} for ${monthKey}`, dateStr);
-      return;
-    }
-
-    // 3. Publish
+        question.question === "Past question — not published.")
+      return await setCronAlert("no_question", `No valid question at index ${dayNum - 1}`, dateStr);
     const published = { ...question, id: `q_${dateStr}`, publishedAt: Date.now() };
     await dbSet(`question:${dateStr}`, JSON.stringify(published));
     await updateArchive(dateStr, question);
     await dbDelete("cron_alert");
-
-    // 4. Warn if bank runs out in the next 3 days
     const daysLeft = bank.filter((q, i) => i >= dayNum && q && q.question &&
       q.answer !== "N/A" && q.question !== "Past question — not published.").length;
-    if (daysLeft <= 3) {
-      await setCronAlert("bank_low", `Only ${daysLeft} question(s) remaining in ${monthKey} bank`, dateStr);
-    }
-
+    if (daysLeft <= 3) await setCronAlert("bank_low", `Only ${daysLeft} question(s) left in ${monthKey}`, dateStr);
     console.log(`[CRON daily] Published "${question.answer}" for ${dateStr}`);
   } catch (e) {
     console.error("[CRON daily] Error:", e.message);
@@ -102,54 +100,45 @@ cron.schedule("0 6 * * *", async () => {
   }
 }, { timezone: "America/New_York" });
 
-// ─── Monthly cron — midnight on the 1st (Eastern) ────────────────────────────
-// Archives last month's leaderboard to Hall of Fame, logs the winner.
+// ─── Monthly cron — midnight on the 1st ──────────────────────────────────────
 
 cron.schedule("0 0 1 * *", async () => {
-  console.log("[CRON monthly] Running monthly reset...");
+  console.log("[CRON monthly] Archiving leaderboard...");
   try {
-    // Derive previous month key
     const now  = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
     const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
-    const prevMonthKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
-
-    const lbRaw = await dbGet(`leaderboard:${prevMonthKey}`);
+    const prevKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    const lbRaw = await dbGet(`leaderboard:${prevKey}`);
     if (lbRaw) {
       const lb = JSON.parse(lbRaw);
       if (lb.length > 0) {
-        await dbSet(`halloffame:${prevMonthKey}`, lbRaw);
-        console.log(`[CRON monthly] Hall of Fame: ${prevMonthKey} winner → ${lb[0].username} (${lb[0].points} pts)`);
+        await dbSet(`halloffame:${prevKey}`, lbRaw);
+        console.log(`[CRON monthly] Winner: ${lb[0].username} (${lb[0].points} pts)`);
       }
     }
     console.log("[CRON monthly] Done.");
-  } catch (e) {
-    console.error("[CRON monthly] Error:", e.message);
-  }
+  } catch (e) { console.error("[CRON monthly] Error:", e.message); }
 }, { timezone: "America/New_York" });
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
 async function updateArchive(dateStr, q) {
-  const entry = {
+  await dbSet(`archive:${dateStr}`, JSON.stringify({
     date: dateStr,
     question: q.question,
     answer: q.answer,
     displayAnswer: q.displayAnswer || q.answer,
     category: q.category || "Wildcard",
     points: q.points || 200,
-  };
-  await dbSet(`archive:${dateStr}`, JSON.stringify(entry));
+  }));
   const idxRaw = await dbGet("archive_index");
   const idx    = idxRaw ? JSON.parse(idxRaw) : [];
-  if (!idx.includes(dateStr)) {
-    await dbSet("archive_index", JSON.stringify([dateStr, ...idx]));
-  }
+  if (!idx.includes(dateStr)) await dbSet("archive_index", JSON.stringify([dateStr, ...idx]));
 }
 
 async function setCronAlert(type, message, dateStr) {
-  const alert = { type, message, date: dateStr, ts: Date.now() };
-  await dbSet("cron_alert", JSON.stringify(alert));
-  console.error(`[CRON daily] ALERT (${type}): ${message}`);
+  await dbSet("cron_alert", JSON.stringify({ type, message, date: dateStr, ts: Date.now() }));
+  console.error(`[CRON] ALERT (${type}): ${message}`);
 }
 
 // ─── Storage API routes ───────────────────────────────────────────────────────
@@ -192,5 +181,6 @@ app.get("*", (req, res) => {
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`WhatIs... server running on port ${PORT}`);
-  console.log(`Cron jobs scheduled: daily 6am EST + monthly reset on 1st`);
+  console.log(`DB: ${UPSTASH_URL ? "Upstash Redis connected" : "NO DB CONFIGURED"}`);
+  console.log(`Cron: daily 6am EST + monthly reset`);
 });
