@@ -1779,6 +1779,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm]   = useState({});
   const [userSaved, setUserSaved] = useState(false);
+  const [backingUp, setBackingUp] = useState(false);
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -1874,6 +1875,46 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     setDeletingMonth(null);
   };
 
+  // ── Export / backup helpers ─────────────────────────────────────────────
+  const downloadJSON = (filename, dataObj) => {
+    const blob = new Blob([JSON.stringify(dataObj, null, 2)], { type: "application/json" });
+    const url  = URL.createObjectURL(blob);
+    const a    = document.createElement("a");
+    a.href = url; a.download = filename;
+    document.body.appendChild(a); a.click(); a.remove();
+    URL.revokeObjectURL(url);
+  };
+
+  // Download a single month's bank, e.g. questions_july_2026.json
+  const exportMonth = (monthKey, label) => {
+    const bank = monthBanks[monthKey];
+    if (!bank) return;
+    const slug = label.toLowerCase().replace(/\s+/g, "_"); // "July 2026" -> "july_2026"
+    downloadJSON(`questions_${slug}.json`, bank);
+  };
+
+  // Download every key in the database as one backup file
+  const exportFullBackup = async () => {
+    setBackingUp(true);
+    try {
+      const { keys = [] } = await apiStorage.list("");
+      const results = await Promise.allSettled(keys.map(k => apiStorage.get(k)));
+      const data = {};
+      keys.forEach((k, i) => {
+        if (results[i].status === "fulfilled" && results[i].value) {
+          const raw = results[i].value.value;
+          try { data[k] = JSON.parse(raw); } catch(e) { data[k] = raw; }
+        }
+      });
+      downloadJSON(`whatis_backup_${todayKey()}.json`, {
+        exportedAt: new Date().toISOString(),
+        keyCount: keys.length,
+        data,
+      });
+    } catch(e) {}
+    setBackingUp(false);
+  };
+
   const publishQuestion = async (q) => {
     const today = todayKey();
     const full  = { ...q, id: `q_${today}` };
@@ -1939,6 +1980,23 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             <span style={{ fontFamily: "'Courier New',monospace", color: GOLD }}>category</span> fields.
           </div>
 
+          {/* Full backup bar */}
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between",
+                        gap: 12, flexWrap: "wrap", background: "rgba(201,168,76,0.06)",
+                        border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10,
+                        padding: "13px 16px", marginBottom: 16 }}>
+            <div>
+              <div style={{ fontSize: "0.83rem", fontWeight: 600, color: OFF_WHITE }}>Full backup</div>
+              <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, marginTop: 2 }}>
+                Download every question bank, user, leaderboard &amp; archive as one file.
+              </div>
+            </div>
+            <button onClick={exportFullBackup} disabled={backingUp}
+              style={{ ...s.btn, whiteSpace: "nowrap", opacity: backingUp ? 0.6 : 1 }}>
+              {backingUp ? "Backing up…" : "⬇ Backup all data"}
+            </button>
+          </div>
+
           <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
             {slots.map(({ key, label, isCurrent }) => {
               const bank    = monthBanks[key];
@@ -1996,6 +2054,15 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                         </div>
                       ) : (
                         <>
+                          {loaded && (
+                            <button onClick={() => exportMonth(key, label)}
+                              style={{ padding: "8px 12px", borderRadius: 6, cursor: "pointer",
+                                border: `1px solid ${SURFACE3}`, background: "transparent",
+                                color: GOLD, fontFamily: SANS, fontSize: "0.75rem",
+                                fontWeight: 500 }}>
+                              ⬇ Export
+                            </button>
+                          )}
                           {loaded && (
                             <button onClick={() => setDeletingMonth(key)}
                               style={{ padding: "8px 12px", borderRadius: 6, cursor: "pointer",
