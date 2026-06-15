@@ -81,7 +81,7 @@ const SAMPLE = { id: "q1", question: "This financial instrument allows investors
 const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
 const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
 const daysLeft = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate() - d.getDate(); };
-const normalize = (s) => s.toLowerCase().replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
+const normalize = (s) => s.toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
 const checkAnswer = (u, c, aliases = []) => {
   const un = normalize(u);
   const targets = [c, ...aliases].map(normalize);
@@ -336,10 +336,24 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
   useEffect(() => {
     if (!user) return;
     const localKey = `sub:${todayKey()}:${user.username}`;
-    const local = localStorage.getItem(localKey);
-    if (local && !submissions[user.username]) {
-      try { setSubmissions(prev => ({ ...prev, [user.username]: JSON.parse(local) })); } catch(e) {}
-    }
+    // Check if admin has reset this user's submission
+    apiStorage.get(`sub_reset:${todayKey()}:${user.username}`).then(r => {
+      if (r) {
+        localStorage.removeItem(localKey);
+        apiStorage.delete(`sub_reset:${todayKey()}:${user.username}`).catch(() => {});
+        setSubmissions(prev => { const n = { ...prev }; delete n[user.username]; return n; });
+      } else {
+        const local = localStorage.getItem(localKey);
+        if (local && !submissions[user.username]) {
+          try { setSubmissions(prev => ({ ...prev, [user.username]: JSON.parse(local) })); } catch(e) {}
+        }
+      }
+    }).catch(() => {
+      const local = localStorage.getItem(localKey);
+      if (local && !submissions[user.username]) {
+        try { setSubmissions(prev => ({ ...prev, [user.username]: JSON.parse(local) })); } catch(e) {}
+      }
+    });
     loadHistory(user.username);
   }, [user?.username]);
 
@@ -1381,8 +1395,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [uploadErrors, setUploadErrors] = useState({}); // { "2026-07": "msg" }
   const [deletingMonth, setDeletingMonth] = useState(null); // monthKey pending confirmation
   const [qForm, setQForm]       = useState({ question: "", answer: "", displayAnswer: "", category: "Finance", points: 200 });
-  const [adminUsers, setAdminUsers]       = useState({});
-  const [adminHistories, setAdminHistories] = useState({});
+  const [adminUsers, setAdminUsers]           = useState({});
+  const [adminHistories, setAdminHistories]   = useState({});
+  const [adminSubmissions, setAdminSubmissions] = useState({});
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm]   = useState({});
   const [userSaved, setUserSaved] = useState(false);
@@ -1436,6 +1451,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             try { histories[u] = JSON.parse(histResults[i].value.value); } catch(e) {}
         });
         setAdminHistories(histories);
+
+        // Load today's submissions
+        const subR = await apiStorage.get(`submissions:${todayKey()}`).catch(() => null);
+        if (subR) try { setAdminSubmissions(JSON.parse(subR.value)); } catch(e) {}
       }
     } catch(e) {}
   };
@@ -1789,6 +1808,31 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     <input style={s.input} value={editForm.email || ""}
                       onChange={e => setEditForm({ ...editForm, email: e.target.value })} />
                   </div>
+                  {adminSubmissions[u.username] && (() => {
+                    const sub = adminSubmissions[u.username];
+                    const t = sub.time ? new Date(sub.time).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit", hour12: true }) : "—";
+                    return (
+                      <div style={{ background: sub.isCorrect ? "rgba(76,175,125,0.08)" : "rgba(224,92,92,0.08)", border: `1px solid ${sub.isCorrect ? "rgba(76,175,125,0.25)" : "rgba(224,92,92,0.25)"}`, borderRadius: 8, padding: "12px 15px", marginBottom: 10 }}>
+                        <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 8 }}>Today's submission</div>
+                        <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+                          <div>
+                            <div style={{ fontSize: "0.82rem", fontWeight: 600, color: sub.isCorrect ? "#4CAF7D" : "#E05C5C", marginBottom: 3 }}>
+                              {sub.isCorrect ? "✓ Correct" : "✗ Incorrect"}
+                            </div>
+                            <div style={{ ...s.mono, fontSize: "0.78rem", color: OFF_WHITE, marginBottom: 2 }}>
+                              "{sub.answer}"
+                            </div>
+                            <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>
+                              {t} · {sub.responseTime}s · {sub.points} pts
+                            </div>
+                          </div>
+                        </div>
+                      </div>
+                    );
+                  })()}
+                  {!adminSubmissions[u.username] && (
+                    <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, padding: "8px 0", marginBottom: 6 }}>No submission today</div>
+                  )}
                   {adminHistories[u.username] && (() => {
                     const h = adminHistories[u.username];
                     const acc = h.totalAnswered > 0 ? Math.round((h.totalCorrect / h.totalAnswered) * 100) : 0;
@@ -1833,6 +1877,20 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     setEditingUser(null); setUserSaved(true);
                     setTimeout(() => setUserSaved(false), 3000);
                   }}>Save changes</button>
+                  <button style={{ ...s.btnSec, width: "100%", marginTop: 8, color: "#E05C5C", borderColor: "rgba(224,92,92,0.3)" }} onClick={async () => {
+                    const dateKey = todayKey();
+                    // Remove from DB submissions
+                    const sR = await apiStorage.get(`submissions:${dateKey}`).catch(() => null);
+                    if (sR) {
+                      const subs = JSON.parse(sR.value);
+                      delete subs[u.username];
+                      await apiStorage.set(`submissions:${dateKey}`, JSON.stringify(subs));
+                    }
+                    // Set reset flag so their localStorage gets cleared on next load
+                    await apiStorage.set(`sub_reset:${dateKey}:${u.username}`, "1");
+                    setUserSaved(true);
+                    setTimeout(() => setUserSaved(false), 3000);
+                  }}>↺ Reset today's submission</button>
                   {userSaved && <div style={{ color: "#4CAF7D", fontSize: "0.8rem", marginTop: 7, textAlign: "center" }}>✓ Saved</div>}
                 </div>
               )}
