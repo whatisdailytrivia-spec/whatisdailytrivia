@@ -421,9 +421,9 @@ export default function App() {
 
       <div style={s.main}>
         {tab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
-        {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} />}
+        {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
         {tab === "winners"     && <WinnersTab />}
-        {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} />}
+        {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
         {tab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
         {tab === "archive"     && <ArchiveTab />}
         {tab === "rules"       && <RulesTab />}
@@ -791,15 +791,15 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
-          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)}
-          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} />)}
+          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
         </>;
       })()}
     </div>
   );
 }
 
-function LBRow({ entry, rank, isMe, host }) {
+function LBRow({ entry, rank, isMe, host, answeredToday }) {
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   return (
     <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
@@ -807,6 +807,9 @@ function LBRow({ entry, rank, isMe, host }) {
       <div>
         <div style={{ fontWeight: 500, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {entry.displayName || entry.username}
+          {answeredToday && (
+            <span title="Answered today's question" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(76,175,125,0.18)", border: "1px solid rgba(76,175,125,0.5)", color: "#4CAF7D", fontSize: "0.6rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
+          )}
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {host && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "1px 7px", letterSpacing: "0.08em" }}>HOST</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
@@ -915,7 +918,7 @@ function WinnersTab() {
   );
 }
 
-function LeaderboardTab({ leaderboard, user }) {
+function LeaderboardTab({ leaderboard, user, submissions }) {
   return (
     <div>
       <div style={{ ...s.label, fontSize: "1rem" }}>Monthly Leaderboard & Prize</div>
@@ -936,8 +939,8 @@ function LeaderboardTab({ leaderboard, user }) {
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
         return <>
-          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} />)}
-          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} />)}
+          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
         </>;
       })()}
     </div>
@@ -1038,7 +1041,7 @@ function ArchiveTab() {
   );
 }
 
-function GroupsTab({ user, setUser, saveUser, users }) {
+function GroupsTab({ user, setUser, saveUser, users, submissions }) {
   // view: "home" | "create" | "join" | "group"
   const [view, setView] = useState("home");
   const [activeGroup, setActiveGroup] = useState(null);
@@ -1210,8 +1213,8 @@ function GroupsTab({ user, setUser, saveUser, users }) {
           if (real.length === 0 && hosts.length === 0)
             return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>;
           return <>
-            {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} />)}
-            {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} />)}
+            {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
+            {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
           </>;
         })()}
 
