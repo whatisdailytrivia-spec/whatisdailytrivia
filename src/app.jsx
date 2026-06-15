@@ -194,6 +194,9 @@ const CAT = {
   Wildcard: { bg: "rgba(200,80,80,0.1)", text: "#E05C5C" },
 };
 
+// Shared 4-column grid for leaderboard rows + header: rank | player | score | today
+const LB_COLS = "26px minmax(0,1fr) 64px 84px";
+
 const s = {
   app: { background: BLACK, minHeight: "100vh", color: OFF_WHITE, fontFamily: SANS },
   nav: { display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 20px", borderBottom: `1px solid ${SURFACE2}`, position: "sticky", top: 0, background: "rgba(10,10,10,0.97)", backdropFilter: "blur(10px)", zIndex: 100 },
@@ -213,7 +216,7 @@ const s = {
   badge: { display: "inline-block", padding: "2px 9px", borderRadius: 100, fontSize: "0.65rem", fontFamily: "'Courier New',monospace", letterSpacing: "0.08em" },
   mono: { fontFamily: "'Courier New',monospace" },
   divider: { border: "none", borderTop: `1px solid ${SURFACE3}`, margin: "24px 0" },
-  lbRow: { display: "grid", gridTemplateColumns: "30px 1fr auto", alignItems: "center", gap: 10, padding: "11px 14px", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, marginBottom: 6 },
+  lbRow: { display: "grid", gridTemplateColumns: LB_COLS, alignItems: "center", gap: 8, padding: "11px 14px", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, marginBottom: 6 },
 };
 
 const TABS = [
@@ -791,10 +794,24 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
+          <LBHeader />
           {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
           {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
         </>;
       })()}
+    </div>
+  );
+}
+
+function LBHeader() {
+  return (
+    <div style={{ display: "grid", gridTemplateColumns: LB_COLS, alignItems: "end", gap: 8, padding: "0 14px 6px" }}>
+      <div></div>
+      <div></div>
+      <div></div>
+      <div style={{ ...s.mono, fontSize: "0.52rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.04em", textAlign: "right", lineHeight: 1.2 }}>
+        Today's Questions?
+      </div>
     </div>
   );
 }
@@ -804,12 +821,9 @@ function LBRow({ entry, rank, isMe, host, answeredToday }) {
   return (
     <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
       <div style={{ ...s.mono, fontSize: "0.8rem", color: (!host && rank <= 3) ? GOLD : TEXT_MUTED, textAlign: "center" }}>{host ? "—" : (medals[rank] || rank)}</div>
-      <div>
+      <div style={{ minWidth: 0 }}>
         <div style={{ fontWeight: 500, fontSize: "0.85rem", display: "flex", alignItems: "center", gap: 6, flexWrap: "wrap" }}>
           {entry.displayName || entry.username}
-          {answeredToday && (
-            <span title="Answered today's question" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 15, height: 15, borderRadius: "50%", background: "rgba(76,175,125,0.18)", border: "1px solid rgba(76,175,125,0.5)", color: "#4CAF7D", fontSize: "0.6rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
-          )}
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {host && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "1px 7px", letterSpacing: "0.08em" }}>HOST</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
@@ -820,7 +834,12 @@ function LBRow({ entry, rank, isMe, host, answeredToday }) {
             : `🔥${entry.streak || 0} · ${entry.correct || 0}/${entry.answered || 0} correct`}
         </div>
       </div>
-      <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD }}>{host ? "—" : `${entry.points} pts`}</div>
+      <div style={{ ...s.mono, fontSize: host ? "0.7rem" : "0.85rem", fontWeight: 500, color: host ? TEXT_MUTED : GOLD, textAlign: "right" }}>{host ? "—" : `${entry.points} pts`}</div>
+      <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
+        {answeredToday
+          ? <span title="Answered today's question" style={{ display: "inline-flex", alignItems: "center", justifyContent: "center", width: 18, height: 18, borderRadius: "50%", background: "rgba(76,175,125,0.18)", border: "1px solid rgba(76,175,125,0.55)", color: "#4CAF7D", fontSize: "0.68rem", lineHeight: 1, flexShrink: 0 }}>✓</span>
+          : <span title="Hasn't answered yet today" style={{ display: "inline-flex", width: 18, height: 18, borderRadius: "50%", border: `1px solid ${SURFACE3}`, flexShrink: 0 }} />}
+      </div>
     </div>
   );
 }
@@ -923,6 +942,16 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
     <div>
       <div style={{ ...s.label, fontSize: "1rem" }}>Monthly Leaderboard & Prize</div>
       <div style={s.h2}>{new Date().toLocaleString("default", { month: "long" })} {new Date().getFullYear()}</div>
+      {(() => {
+        const playerCount = orderBoard(leaderboard).real.length;
+        return (
+          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "7px 15px", marginBottom: 14 }}>
+            <span style={{ fontSize: "0.9rem" }}>👥</span>
+            <span style={{ fontFamily: SERIF, fontSize: "1.1rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{playerCount}</span>
+            <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.07em" }}>player{playerCount !== 1 ? "s" : ""} competing this month</span>
+          </div>
+        );
+      })()}
       <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10, padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ ...s.mono, fontSize: "1rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
@@ -939,6 +968,7 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
         return <>
+          <LBHeader />
           {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
           {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} answeredToday={!!(submissions && submissions[e.username])} />)}
         </>;
@@ -1213,6 +1243,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
           if (real.length === 0 && hosts.length === 0)
             return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet — answer today's question to get started!</div></div>;
           return <>
+            <LBHeader />
             {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
             {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} answeredToday={!!(submissions && submissions[e.username])} />)}
           </>;
@@ -1818,6 +1849,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm]   = useState({});
   const [userSaved, setUserSaved] = useState(false);
+  const [userSearch, setUserSearch] = useState("");
+  const [userSort, setUserSort]   = useState("newest"); // newest | oldest | alpha
   const [backingUp, setBackingUp] = useState(false);
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
@@ -2248,10 +2281,28 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       {/* ── USERS ────────────────────────────────────────────────────────── */}
       {section === "users" && (
         <div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.85rem", marginBottom: 18 }}>
+          <div style={{ color: TEXT_SEC, fontSize: "0.85rem", marginBottom: 14 }}>
             {Object.keys(adminUsers).length} registered user{Object.keys(adminUsers).length !== 1 ? "s" : ""}. Click any row to edit.
           </div>
-          {Object.values(adminUsers).map(u => (
+          <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
+            <input style={{ ...s.input, flex: 1, minWidth: 160 }} placeholder="Search by name or email..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
+            <select style={{ ...s.input, width: "auto" }} value={userSort} onChange={e => setUserSort(e.target.value)}>
+              <option value="newest">Newest first</option>
+              <option value="oldest">Oldest first</option>
+              <option value="alpha">Name (A–Z)</option>
+            </select>
+          </div>
+          {(() => {
+            const q = userSearch.trim().toLowerCase();
+            const list = Object.values(adminUsers)
+              .filter(u => !q || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
+              .sort((a, b) => userSort === "alpha"
+                ? (a.username || "").localeCompare(b.username || "")
+                : userSort === "oldest"
+                  ? (a.joined || "").localeCompare(b.joined || "")
+                  : (b.joined || "").localeCompare(a.joined || ""));
+            if (!list.length) return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "20px 0", textAlign: "center" }}>No users match your search.</div>;
+            return list.map(u => (
             <div key={u.username}>
               <div onClick={() => { setEditingUser(editingUser === u.username ? null : u.username); setEditForm({ ...u }); setUserSaved(false); }}
                 style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 10,
@@ -2262,6 +2313,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 <div>
                   <div style={{ fontWeight: 500, fontSize: "0.85rem" }}>{u.username}</div>
                   <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 1 }}>{u.email}</div>
+                  {u.joined && <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 2 }}>Joined {new Date(u.joined + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>}
                 </div>
                 <div style={{ ...s.badge, background: u.state ? "rgba(201,168,76,0.1)" : SURFACE2,
                   border: `1px solid ${u.state ? "rgba(201,168,76,0.3)" : SURFACE3}`,
@@ -2381,7 +2433,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 </div>
               )}
             </div>
-          ))}
+          ));
+          })()}
         </div>
       )}
 
