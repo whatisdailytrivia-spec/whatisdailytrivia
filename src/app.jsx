@@ -2370,16 +2370,15 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                   <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.totalAccounts ? Math.round((p.activeUsers / p.totalAccounts) * 100) : 0} last={`${partToday}% today`} />
                   <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
                     {[
-                      [`${wau}`, "Active · 7d"],
                       [`${mau}`, "Active · 30d"],
-                      [`${stickiness}%`, "Stickiness"],
+                      [`${stickiness}%`, "Stickiness", "Stickiness = daily active ÷ monthly active (DAU/MAU). Of the accounts that play in a 30-day window, the share that show up on a given day — i.e. how habitual the game is. 100% means everyone who played this month also played today. Note: with a small user base where DAU and MAU are close, this runs high and is noisy; it sharpens as monthly numbers grow."],
                       [avgPerUser.toFixed(1), "Answers / acct"],
                       [`${playedAny.length}/${totalUsers}`, "Ever played"],
                       [`${dormant}`, "Never played"],
-                    ].map(([v, l], i) => (
-                      <div key={i} style={{ display: "flex", alignItems: "baseline", gap: 6 }}>
+                    ].map(([v, l, tip], i) => (
+                      <div key={i} title={tip || undefined} style={{ display: "flex", alignItems: "baseline", gap: 6, cursor: tip ? "help" : "default" }}>
                         <span style={{ ...s.mono, fontSize: "0.88rem", fontWeight: 600, color: OFF_WHITE }}>{v}</span>
-                        <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}</span>
+                        <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}{tip ? " ⓘ" : ""}</span>
                       </div>
                     ))}
                   </div>
