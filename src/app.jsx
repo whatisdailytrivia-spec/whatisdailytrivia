@@ -1870,7 +1870,7 @@ function ContactTab() {
 function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [pw, setPw]             = useState("");
   const [pwErr, setPwErr]       = useState("");
-  const [section, setSection]   = useState("questions");
+  const [section, setSection]   = useState("analytics");
   const [saved, setSaved]       = useState(false);
   const [monthBanks, setMonthBanks] = useState({});    // { "2026-07": [...], ... }
   const [uploadStatus, setUploadStatus] = useState({}); // { "2026-07": "success"|"error" }
@@ -1886,6 +1886,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [userSearch, setUserSearch] = useState("");
   const [userSort, setUserSort]   = useState("newest"); // newest | oldest | alpha
   const [backingUp, setBackingUp] = useState(false);
+  const [analyticsSeries, setAnalyticsSeries] = useState([]);   // durable daily rollups, oldest→newest
+  const [analyticsRange, setAnalyticsRange]   = useState("All"); // 30D | 90D | All
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -1950,8 +1952,67 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         // Load today's submissions
         const subR = await apiStorage.get(`submissions:${todayKey()}`).catch(() => null);
         if (subR) try { setAdminSubmissions(JSON.parse(subR.value)); } catch(e) {}
+
+        // Build / extend the durable daily analytics series (back to day 1)
+        loadAnalyticsSeries(parsedUsers);
       }
     } catch(e) {}
+  };
+
+  // ── Durable, append-only daily analytics rollup ──────────────────────────
+  // Finalizes one immutable snapshot per past day from permanent keys
+  // (submissions:DATE + archive:DATE + account join dates), so the full
+  // history is retained forever even as per-user logs age out. Self-healing:
+  // any missing past days are computed and appended on load.
+  const loadAnalyticsSeries = async (usersObj) => {
+    try {
+      const users = Object.values(usersObj || {});
+      const keyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+      const addDays = (key, n) => { const [y, m, dd] = key.split("-").map(Number); const dt = new Date(y, m - 1, dd); dt.setDate(dt.getDate() + n); return keyOf(dt); };
+      const today = todayKey();
+      const yesterday = addDays(today, -1);
+
+      let series = [];
+      const sR = await apiStorage.get("analytics_series").catch(() => null);
+      if (sR) { try { series = JSON.parse(sR.value) || []; } catch(e) { series = []; } }
+      const have = new Set(series.map(p => p.date));
+
+      // Determine day 1: explicit launch date, else earliest account join
+      let startDate = null;
+      const lR = await apiStorage.get("launch_date").catch(() => null);
+      if (lR && lR.value) startDate = lR.value;
+      const joinedSorted = users.map(u => u.joined).filter(Boolean).sort();
+      if (!startDate && joinedSorted.length) startDate = joinedSorted[0];
+      if (!startDate) { setAnalyticsSeries(series.slice().sort((a, b) => a.date.localeCompare(b.date))); return; }
+
+      // Which past days still need a finalized snapshot
+      const need = [];
+      let cur = startDate, guard = 0;
+      while (cur <= yesterday && guard < 800) { if (!have.has(cur)) need.push(cur); cur = addDays(cur, 1); guard++; }
+
+      if (need.length) {
+        const subResults = await Promise.allSettled(need.map(d => apiStorage.get(`submissions:${d}`)));
+        const arcResults = await Promise.allSettled(need.map(d => apiStorage.get(`archive:${d}`)));
+        need.forEach((d, i) => {
+          let subs = {}; const sr = subResults[i];
+          if (sr.status === "fulfilled" && sr.value) { try { subs = JSON.parse(sr.value.value) || {}; } catch(e) {} }
+          let cat = null; const ar = arcResults[i];
+          if (ar.status === "fulfilled" && ar.value) { try { cat = (JSON.parse(ar.value.value) || {}).category || null; } catch(e) {} }
+          const arr = Object.values(subs);
+          const answers = arr.length;
+          const correct = arr.filter(x => x && x.isCorrect).length;
+          series.push({
+            date: d,
+            totalAccounts: users.filter(u => u.joined && u.joined <= d).length,
+            newAccounts: users.filter(u => u.joined === d).length,
+            activeUsers: answers, answers, correct, category: cat,
+          });
+        });
+        series.sort((a, b) => a.date.localeCompare(b.date));
+        await apiStorage.set("analytics_series", JSON.stringify(series));
+      }
+      setAnalyticsSeries(series.slice().sort((a, b) => a.date.localeCompare(b.date)));
+    } catch (e) { /* non-fatal */ }
   };
 
   const unlock = () => {
@@ -2074,7 +2135,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     <div>
       <div style={s.label}>Admin Panel</div>
       <div style={{ display: "flex", gap: 5, marginBottom: 22, flexWrap: "wrap" }}>
-        {[["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"]].map(([k, l]) => (
+        {[["analytics","📊 Analytics"],["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"]].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)}
             style={{ padding: "7px 12px", borderRadius: 6,
               border: section === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`,
@@ -2085,6 +2146,260 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           </button>
         ))}
       </div>
+
+      {/* ── ANALYTICS ──────────────────────────────────────────────────── */}
+      {section === "analytics" && (() => {
+        const users = Object.values(adminUsers);
+        const totalUsers = users.length;
+        const hist = adminHistories;
+        const today = todayKey();
+        const keyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+        const lastKeys = (n) => { const out = []; for (let i = 0; i < n; i++) { const d = new Date(); d.setDate(d.getDate() - i); out.push(keyOf(d)); } return out; };
+        const within = (key, n) => new Set(lastKeys(n)).has(key);
+
+        // ── Account creation ──
+        const joined = users.map(u => u.joined).filter(Boolean);
+        const newToday = joined.filter(d => d === today).length;
+        const new7 = joined.filter(d => within(d, 7)).length;
+        const new30 = joined.filter(d => within(d, 30)).length;
+        const set8to14 = new Set(lastKeys(14).slice(7));
+        const prevWeek = joined.filter(d => set8to14.has(d)).length;
+        const wow = prevWeek > 0 ? Math.round(((new7 - prevWeek) / prevWeek) * 100) : (new7 > 0 ? 100 : 0);
+        const signupSeries = lastKeys(14).slice().reverse().map(k => ({ k, v: joined.filter(d => d === k).length }));
+
+        // ── Play dates per account (from dailyLog) ──
+        const playDates = {};
+        users.forEach(u => { const h = hist[u.username]; const set = new Set(); if (h && Array.isArray(h.dailyLog)) h.dailyLog.forEach(e => { if (e && e.date) set.add(e.date); }); playDates[u.username] = set; });
+        const playedAny = users.filter(u => playDates[u.username].size > 0);
+        const distinctDays = (u) => playDates[u.username].size;
+        const activeIn = (n) => { const set = new Set(lastKeys(n)); return users.filter(u => [...playDates[u.username]].some(d => set.has(d))).length; };
+        const dau = activeIn(1), wau = activeIn(7), mau = activeIn(30);
+        const stickiness = mau > 0 ? Math.round((dau / mau) * 100) : 0;
+        const dauSeries = lastKeys(14).slice().reverse().map(k => ({ k, v: users.filter(u => playDates[u.username].has(k)).length }));
+
+        // ── Volume / accuracy / time ──
+        const sum = (f) => users.reduce((a, u) => a + (hist[u.username] ? (f(hist[u.username]) || 0) : 0), 0);
+        const totalAnswers = sum(h => h.totalAnswered);
+        const totalCorrect = sum(h => h.totalCorrect);
+        const accuracy = totalAnswers > 0 ? Math.round((totalCorrect / totalAnswers) * 100) : 0;
+        const avgPerUser = totalUsers > 0 ? totalAnswers / totalUsers : 0;
+        const allTimes = users.flatMap(u => (hist[u.username]?.responseTimes) || []);
+        const avgTime = allTimes.length ? Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length) : null;
+
+        // ── Retention ──
+        const returning = playedAny.filter(u => distinctDays(u) >= 2).length;
+        const returnRate = playedAny.length > 0 ? Math.round((returning / playedAny.length) * 100) : 0;
+        const dormant = users.filter(u => playDates[u.username].size === 0).length;
+        const olderThan7 = users.filter(u => u.joined && !within(u.joined, 7));
+        const retained7 = olderThan7.filter(u => [...playDates[u.username]].some(d => within(d, 7))).length;
+        const ret7Rate = olderThan7.length > 0 ? Math.round((retained7 / olderThan7.length) * 100) : 0;
+        const streaks = users.map(u => u.streak || 0);
+        const onStreak = streaks.filter(x => x >= 3).length;
+        const maxStreak = streaks.length ? Math.max(...streaks) : 0;
+        const activation = totalUsers ? Math.round((playedAny.length / totalUsers) * 100) : 0;
+        const depth = { one: playedAny.filter(u => distinctDays(u) === 1).length, few: playedAny.filter(u => { const d = distinctDays(u); return d >= 2 && d <= 5; }).length, many: playedAny.filter(u => distinctDays(u) >= 6).length };
+
+        // ── Question performance ──
+        const cats = {};
+        users.forEach(u => { const h = hist[u.username]; if (h && h.categoryStats) Object.entries(h.categoryStats).forEach(([c, st]) => { const o = cats[c] || (cats[c] = { answered: 0, correct: 0 }); o.answered += st.answered || 0; o.correct += st.correct || 0; }); });
+        const catTime = {}; const byDate = {};
+        users.forEach(u => { const h = hist[u.username]; if (h && Array.isArray(h.dailyLog)) h.dailyLog.forEach(e => {
+          if (!e) return;
+          if (e.category && typeof e.responseTime === "number") { const t = catTime[e.category] || (catTime[e.category] = { sum: 0, n: 0 }); t.sum += e.responseTime; t.n++; }
+          if (e.date) { const d = byDate[e.date] || (byDate[e.date] = { answered: 0, correct: 0, sum: 0, n: 0, category: e.category }); d.answered++; if (e.correct) d.correct++; if (typeof e.responseTime === "number") { d.sum += e.responseTime; d.n++; } if (e.category) d.category = e.category; }
+        }); });
+        const catRows = Object.entries(cats).filter(([, v]) => v.answered > 0).map(([c, v]) => ({ c, acc: Math.round((v.correct / v.answered) * 100), answered: v.answered, correct: v.correct, time: catTime[c] && catTime[c].n ? Math.round(catTime[c].sum / catTime[c].n) : null })).sort((a, b) => a.acc - b.acc);
+        const toughest = catRows[0]; const easiest = catRows[catRows.length - 1];
+        const recent = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14).map(([date, d]) => ({ date, category: d.category, answered: d.answered, acc: d.answered ? Math.round((d.correct / d.answered) * 100) : 0, time: d.n ? Math.round(d.sum / d.n) : null }));
+
+        // ── helpers ──
+        const Stat = ({ v, l, gold, sub }) => (
+          <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "13px 14px" }}>
+            <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color: gold ? GOLD : OFF_WHITE, lineHeight: 1.1 }}>{v}</div>
+            <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 5, lineHeight: 1.3 }}>{l}</div>
+            {sub != null && <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, marginTop: 4 }}>{sub}</div>}
+          </div>
+        );
+        const Bars = ({ data, color }) => {
+          const max = Math.max(1, ...data.map(d => d.v));
+          return (
+            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginTop: 10 }}>
+              {data.map((d, i) => (
+                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }} title={`${d.k}: ${d.v}`}>
+                  <div style={{ ...s.mono, fontSize: "0.52rem", color: d.v ? TEXT_SEC : TEXT_MUTED }}>{d.v}</div>
+                  <div style={{ width: "100%", height: `${Math.round((d.v / max) * 50)}px`, minHeight: d.v ? 3 : 1, background: d.v ? color : SURFACE3, borderRadius: 2 }} />
+                  <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED }}>{d.k.slice(8)}</div>
+                </div>
+              ))}
+            </div>
+          );
+        };
+        const accColor = (a) => a >= 70 ? "#4CAF7D" : a >= 40 ? GOLD : "#E05C5C";
+        const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
+        const secHead = (t, sub) => (
+          <div style={{ marginTop: 30, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${SURFACE3}` }}>
+            <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE }}>{t}</div>
+            {sub && <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 3 }}>{sub}</div>}
+          </div>
+        );
+        const panel = { background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 14px", marginTop: 10 };
+        const chartTitle = { ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em" };
+        const subTitle = { ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 22, marginBottom: 10 };
+
+        // ── Durable history series (back to day 1) + live "today" point ──
+        const todaysAnswers = Object.keys(adminSubmissions || {}).length;
+        const todaysCorrect = Object.values(adminSubmissions || {}).filter(x => x && x.isCorrect).length;
+        const histSeries = (analyticsSeries || []).filter(p => p.date < today);
+        const mergedSeries = [...histSeries, { date: today, totalAccounts: totalUsers, newAccounts: newToday, activeUsers: dau, answers: todaysAnswers, correct: todaysCorrect, _today: true }];
+        const rangeN = analyticsRange === "30D" ? 30 : analyticsRange === "90D" ? 90 : 9999;
+        const viewSeries = mergedSeries.slice(-rangeN);
+        const hasHistory = viewSeries.length >= 2;
+
+        const LineChart = ({ data, accessor, color }) => {
+          const W = 100, H = 32;
+          const pts = data.map(accessor);
+          const mx = Math.max(1, ...pts), mn = Math.min(0, ...pts);
+          const n = pts.length;
+          const X = (i) => n <= 1 ? 0 : (i / (n - 1)) * W;
+          const Y = (v) => H - ((v - mn) / ((mx - mn) || 1)) * H;
+          const dd = pts.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+          return (
+            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 64, display: "block", marginTop: 6 }}>
+              <path d={`${dd} L${W},${H} L0,${H} Z`} fill={color} opacity="0.12" />
+              <path d={dd} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+            </svg>
+          );
+        };
+        const Trend = ({ title, color, accessor, last }) => (
+          <div style={panel}>
+            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+              <div style={chartTitle}>{title}</div>
+              <div style={{ ...s.mono, fontSize: "0.7rem", color, fontWeight: 600 }}>{last}</div>
+            </div>
+            {hasHistory
+              ? <LineChart data={viewSeries} accessor={accessor} color={color} />
+              : <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "14px 0 4px" }}>Building history — the line fills in as days accrue.</div>}
+            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
+              <span style={{ ...s.mono, fontSize: "0.55rem", color: TEXT_MUTED }}>{viewSeries[0]?.date}</span>
+              <span style={{ ...s.mono, fontSize: "0.55rem", color: TEXT_MUTED }}>{viewSeries[viewSeries.length - 1]?.date}</span>
+            </div>
+          </div>
+        );
+
+        return (
+          <div>
+            <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>Across all {totalUsers} account{totalUsers !== 1 ? "s" : ""}.</div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, flexWrap: "wrap", gap: 8 }}>
+              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{mergedSeries.length} day{mergedSeries.length !== 1 ? "s" : ""} of history tracked · since {mergedSeries[0]?.date || today}</div>
+              <div style={{ display: "flex", gap: 4 }}>
+                {["30D", "90D", "All"].map(r => (
+                  <button key={r} onClick={() => setAnalyticsRange(r)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: analyticsRange === r ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: analyticsRange === r ? "rgba(201,168,76,0.12)" : "transparent", color: analyticsRange === r ? GOLD : TEXT_SEC }}>{r}</button>
+                ))}
+              </div>
+            </div>
+
+            {/* ===== USER ACCOUNT CREATION ===== */}
+            {secHead("User Account Creation", "How fast the player base is growing")}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+              <Stat v={totalUsers} l="Total accounts" gold />
+              <Stat v={`+${newToday}`} l="New today" />
+              <Stat v={`+${new7}`} l="New · 7 days" sub={`${wow >= 0 ? "▲" : "▼"} ${Math.abs(wow)}% WoW`} />
+              <Stat v={`+${new30}`} l="New · 30 days" />
+            </div>
+            <div style={panel}>
+              <div style={chartTitle}>Signups / day · last 14 days</div>
+              <Bars data={signupSeries} color={GOLD} />
+            </div>
+            <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} last={`${totalUsers} total`} />
+
+            {/* ===== USER ENGAGEMENT ===== */}
+            {secHead("User Engagement", "How often and how deeply players come back")}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+              <Stat v={dau} l="Daily active" gold />
+              <Stat v={wau} l="Weekly active" />
+              <Stat v={mau} l="Monthly active" />
+              <Stat v={`${stickiness}%`} l="Stickiness · DAU/MAU" gold />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 8 }}>
+              <Stat v={totalAnswers.toLocaleString()} l="Total answers" />
+              <Stat v={avgPerUser.toFixed(1)} l="Answers / account" />
+              <Stat v={`${activation}%`} l="Activation" sub={`${playedAny.length}/${totalUsers} played ≥ once`} />
+              <Stat v={maxStreak} l="Longest streak 🔥" sub={`${onStreak} on a 3+ streak`} />
+            </div>
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8, marginTop: 8 }}>
+              <Stat v={`${returnRate}%`} l="Returning · 2+ days" sub={`${returning}/${playedAny.length} who played`} />
+              <Stat v={`${ret7Rate}%`} l="7-day retention" sub={`of ${olderThan7.length} older accts`} />
+              <Stat v={dormant} l="Signed up · never played" />
+              <Stat v={playedAny.length} l="Have played" />
+            </div>
+            <div style={panel}>
+              <div style={chartTitle}>Daily active users · last 14 days</div>
+              <Bars data={dauSeries} color="#4CAF7D" />
+            </div>
+            <Trend title="Daily active users · full history" color="#4CAF7D" accessor={p => p.activeUsers || 0} last={`${dau} today`} />
+            <div style={{ ...panel, padding: "13px 15px" }}>
+              <div style={{ ...chartTitle, marginBottom: 10 }}>Engagement depth · days played per active account</div>
+              {[{ l: "1 day only", v: depth.one, c: "#E05C5C" }, { l: "2–5 days", v: depth.few, c: GOLD }, { l: "6+ days", v: depth.many, c: "#4CAF7D" }].map(row => {
+                const mx = Math.max(1, depth.one, depth.few, depth.many); const pct = Math.round((row.v / mx) * 100);
+                return (
+                  <div key={row.l} style={{ display: "grid", gridTemplateColumns: "84px 1fr 30px", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                    <div style={{ fontSize: "0.74rem", color: TEXT_SEC }}>{row.l}</div>
+                    <div style={{ background: SURFACE2, borderRadius: 100, height: 7, overflow: "hidden" }}><div style={{ width: `${pct}%`, height: "100%", background: row.c, borderRadius: 100 }} /></div>
+                    <div style={{ ...s.mono, fontSize: "0.7rem", color: OFF_WHITE, textAlign: "right" }}>{row.v}</div>
+                  </div>
+                );
+              })}
+            </div>
+
+            {/* ===== USER PERFORMANCE ===== */}
+            {secHead("User Performance", "How players do on the questions themselves")}
+            {totalAnswers === 0 ? (
+              <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "8px 0 20px" }}>No answers recorded yet — performance appears once players start answering.</div>
+            ) : (
+              <div>
+                <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+                  <Stat v={`${accuracy}%`} l="Overall accuracy" gold sub={`${totalCorrect.toLocaleString()}/${totalAnswers.toLocaleString()}`} />
+                  <Stat v={avgTime != null ? `${avgTime}s` : "—"} l="Avg answer time" />
+                  <Stat v={toughest ? `${toughest.acc}%` : "—"} l="Toughest category" sub={toughest ? toughest.c : ""} />
+                  <Stat v={easiest ? `${easiest.acc}%` : "—"} l="Easiest category" sub={easiest ? easiest.c : ""} />
+                </div>
+                <div style={{ marginTop: 10 }}>
+                  <Trend title="Daily accuracy · full history" color="#6495ED" accessor={p => p.answers ? Math.round((p.correct / p.answers) * 100) : 0} last={`${accuracy}% all-time`} />
+                </div>
+                <div style={subTitle}>Accuracy by category</div>
+                <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "14px 15px" }}>
+                  {catRows.map(r => { const c = CAT[r.c] || CAT.Wildcard; return (
+                    <div key={r.c} style={{ display: "grid", gridTemplateColumns: "96px 1fr 116px", alignItems: "center", gap: 10, marginBottom: 9 }}>
+                      <div style={{ fontSize: "0.76rem", color: c.text, fontWeight: 500 }}>{r.c}</div>
+                      <div style={{ background: SURFACE2, borderRadius: 100, height: 8, overflow: "hidden" }}><div style={{ width: `${r.acc}%`, height: "100%", background: c.text, borderRadius: 100 }} /></div>
+                      <div style={{ ...s.mono, fontSize: "0.64rem", color: TEXT_SEC, textAlign: "right" }}><span style={{ color: accColor(r.acc), fontWeight: 600 }}>{r.acc}%</span> · {r.correct}/{r.answered}{r.time != null ? ` · ${r.time}s` : ""}</div>
+                    </div>
+                  ); })}
+                </div>
+                <div style={subTitle}>Recent questions · how players did</div>
+                <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, overflow: "hidden" }}>
+                  <div style={{ display: "grid", gridTemplateColumns: "62px 1fr 52px 56px 48px", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${SURFACE3}` }}>
+                    {["Date", "Category", "Played", "Correct", "Avg"].map((h, i) => <div key={i} style={{ ...s.mono, fontSize: "0.57rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.06em", textAlign: i >= 2 ? "right" : "left" }}>{h}</div>)}
+                  </div>
+                  {recent.map(r => { const c = CAT[r.category] || CAT.Wildcard; return (
+                    <div key={r.date} style={{ display: "grid", gridTemplateColumns: "62px 1fr 52px 56px 48px", gap: 8, padding: "9px 14px", borderBottom: `1px solid ${SURFACE2}`, alignItems: "center" }}>
+                      <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC }}>{fmtDate(r.date)}</div>
+                      <div><span style={{ ...s.badge, background: c.bg, color: c.text }}>{r.category || "—"}</span></div>
+                      <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, textAlign: "right" }}>{r.answered}</div>
+                      <div style={{ ...s.mono, fontSize: "0.68rem", color: accColor(r.acc), fontWeight: 600, textAlign: "right" }}>{r.acc}%</div>
+                      <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, textAlign: "right" }}>{r.time != null ? `${r.time}s` : "—"}</div>
+                    </div>
+                  ); })}
+                </div>
+              </div>
+            )}
+
+            <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 18, lineHeight: 1.6 }}>
+              Account creation uses join dates. Engagement & category accuracy use cumulative play history; daily-active, response times and recent-question stats use per-account logs (~last 90 days).
+            </div>
+          </div>
+        );
+      })()}
 
       {/* ── MONTHLY QUESTIONS ────────────────────────────────────────────── */}
       {section === "questions" && (
