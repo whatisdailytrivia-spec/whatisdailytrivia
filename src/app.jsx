@@ -70,9 +70,9 @@ const getMedal = (pos) => pos === 0 ? "gold" : pos === 1 ? "silver" : pos === 2 
 
 // Speed-based scoring
 const GRACE_PERIOD = 15;                     // seconds at full points
-const DECAY_RATE   = 0.003;                  // 0.3% per second lost after grace ends
+const DECAY_RATE   = 0.01;                   // 1% per second lost after grace ends
 const SCORE_FLOOR  = 0.25;                   // minimum 25% of base points
-const FLOOR_TIME   = GRACE_PERIOD + Math.ceil((1 - SCORE_FLOOR) / DECAY_RATE); // ~265s
+const FLOOR_TIME   = GRACE_PERIOD + Math.ceil((1 - SCORE_FLOOR) / DECAY_RATE); // ~90s
 const calcMultiplier = (s) => Math.max(SCORE_FLOOR, 1 - Math.max(0, s - GRACE_PERIOD) * DECAY_RATE);
 const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}`;
 
@@ -142,6 +142,7 @@ const s = {
 const TABS = [
   { id: "play", label: "Today's Question" },
   { id: "leaderboard", label: "Leaderboard" },
+  { id: "winners", label: "Winners" },
   { id: "groups", label: "Groups" },
   { id: "archive", label: "Archive" },
   { id: "rules", label: "Rules" },
@@ -230,7 +231,7 @@ export default function App() {
                   onClick={() => setMoreOpen(o => !o)}
                   style={{
                     ...s.tab,
-                    ...( ["archive","rules","contact","admin"].includes(tab) ? s.tabActive : {} ),
+                    ...( ["archive","rules","contact","admin","winners"].includes(tab) ? s.tabActive : {} ),
                     letterSpacing: "0.04em",
                   }}
                 >
@@ -251,6 +252,7 @@ export default function App() {
                       zIndex: 200, boxShadow: "0 8px 28px rgba(0,0,0,0.5)",
                     }}>
                       {[
+                        { id: "winners", label: "Winners" },
                         { id: "archive", label: "Archive" },
                         { id: "rules",   label: "Rules" },
                         { id: "contact", label: "Contact" },
@@ -303,6 +305,7 @@ export default function App() {
       <div style={s.main}>
         {tab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUsers={saveUsers} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLB={saveLB} />}
         {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} />}
+        {tab === "winners"     && <WinnersTab />}
         {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUsers={saveUsers} users={users} />}
         {tab === "archive"     && <ArchiveTab />}
         {tab === "rules"       && <RulesTab />}
@@ -489,7 +492,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
       </div>
       <div style={s.card}>
         <div style={s.accent} />
-        <div style={s.label}>Today's question · {question?.points || 200} pts</div>
+        <div style={{ ...s.label, fontSize: "0.82rem" }}>Today's question · {question?.points || 200} pts</div>
         {question?.imageType === "map" && question?.numericCode && (
           <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
         )}
@@ -646,6 +649,99 @@ function LBRow({ entry, rank, isMe }) {
         <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>🔥{entry.streak || 0} · {entry.correct || 0}/{entry.answered || 0} correct</div>
       </div>
       <div style={{ ...s.mono, fontSize: "0.85rem", fontWeight: 500, color: GOLD }}>{entry.points} pts</div>
+    </div>
+  );
+}
+
+function WinnersTab() {
+  const [months, setMonths] = useState([]);
+  const [loading, setLoading] = useState(true);
+
+  useEffect(() => { loadWinners(); }, []);
+
+  const loadWinners = async () => {
+    setLoading(true);
+    try {
+      const keys = await apiStorage.list("halloffame:");
+      if (!keys || !keys.keys || !keys.keys.length) { setLoading(false); return; }
+      const sorted = [...keys.keys].sort((a, b) => b.localeCompare(a)); // newest first
+      const results = await Promise.allSettled(sorted.map(k => apiStorage.get(k)));
+      const loaded = results
+        .map((r, i) => {
+          if (r.status !== "fulfilled" || !r.value) return null;
+          try {
+            const lb = JSON.parse(r.value.value);
+            const key = sorted[i]; // "halloffame:2026-06"
+            const monthKey = key.replace("halloffame:", ""); // "2026-06"
+            const [yr, mo] = monthKey.split("-");
+            const label = new Date(parseInt(yr), parseInt(mo) - 1, 1)
+              .toLocaleString("default", { month: "long", year: "numeric" });
+            return { monthKey, label, podium: lb.slice(0, 3) };
+          } catch(e) { return null; }
+        })
+        .filter(Boolean);
+      setMonths(loaded);
+    } catch(e) {}
+    setLoading(false);
+  };
+
+  const PODIUM = [
+    { rank: 1, emoji: "🥇", color: "#FFD700", bg: "rgba(255,215,0,0.08)", border: "rgba(255,215,0,0.25)" },
+    { rank: 2, emoji: "🥈", color: "#C0C0C0", bg: "rgba(192,192,192,0.08)", border: "rgba(192,192,192,0.2)" },
+    { rank: 3, emoji: "🥉", color: "#CD7F32", bg: "rgba(205,127,50,0.08)", border: "rgba(205,127,50,0.2)" },
+  ];
+
+  return (
+    <div>
+      <div style={s.label}>Monthly champions</div>
+      <div style={{ ...s.h2, marginBottom: 6 }}>Winners</div>
+      <div style={{ color: TEXT_SEC, fontSize: "0.82rem", marginBottom: 24 }}>Top 3 finishers from each completed month.</div>
+
+      {loading && (
+        <div style={{ color: TEXT_MUTED, textAlign: "center", padding: "40px 0", fontSize: "0.85rem" }}>Loading...</div>
+      )}
+
+      {!loading && months.length === 0 && (
+        <div style={{ ...s.card, textAlign: "center", padding: "40px" }}>
+          <div style={{ fontSize: "2rem", marginBottom: 12 }}>🏆</div>
+          <div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No completed months yet. Check back after July 1st!</div>
+        </div>
+      )}
+
+      {months.map(({ monthKey, label, podium }) => (
+        <div key={monthKey} style={{ marginBottom: 28 }}>
+          <div style={{ ...s.label, marginBottom: 12 }}>{label}</div>
+          <div style={{ display: "flex", flexDirection: "column", gap: 8 }}>
+            {PODIUM.map(({ rank, emoji, color, bg, border }) => {
+              const entry = podium[rank - 1];
+              if (!entry) return null;
+              return (
+                <div key={rank} style={{
+                  display: "grid", gridTemplateColumns: "36px 1fr auto",
+                  alignItems: "center", gap: 12,
+                  background: rank === 1 ? bg : SURFACE,
+                  border: `1px solid ${rank === 1 ? border : SURFACE3}`,
+                  borderRadius: 8, padding: "13px 16px",
+                }}>
+                  <div style={{ fontSize: "1.4rem", textAlign: "center" }}>{emoji}</div>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "0.88rem", color: rank === 1 ? color : OFF_WHITE, marginBottom: 2 }}>
+                      {entry.username}
+                      {entry.state && <span style={{ ...s.mono, fontSize: "0.63rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px", marginLeft: 7, fontWeight: 400 }}>{entry.state}</span>}
+                    </div>
+                    <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>
+                      🔥{entry.streak || 0} · {entry.correct || 0}/{entry.answered || 0} correct
+                    </div>
+                  </div>
+                  <div style={{ ...s.mono, fontSize: "0.9rem", fontWeight: 700, color: rank === 1 ? color : TEXT_SEC }}>
+                    {entry.points.toLocaleString()} pts
+                  </div>
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      ))}
     </div>
   );
 }
@@ -1097,13 +1193,10 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
 
 function RulesTab() {
   const rules = [
-    { icon: "📅", text: "One question drops daily. One submission per account." },
-    { icon: "⚡", text: "Answer faster to earn more — full points within the 15-second grace period, then points decay over time with a 25% floor." },
-    { icon: "🏆", text: "Highest score at month end wins. Ties broken by fastest average answer time." },
-    { icon: "💰", text: "$100 Visa Gift Card awarded monthly. Winner contacted via Instagram DM within 48 hours." },
-    { icon: "📲", text: "Must follow @whatis_dailytrivia on Instagram to claim the prize." },
-    { icon: "🗓️", text: "Scores reset on the 1st of each month. Every player starts fresh." },
-    { icon: "👥", text: "Create or join private Groups for a side competition with friends and family." },
+    { icon: "📅", text: "New trivia question drops every morning." },
+    { icon: "⚡", text: "Dynamic scoring that rewards speed and accuracy." },
+    { icon: "🏆", text: "Live competition against your community." },
+    { icon: "💵", text: "Monthly prizes for the winner of the Global Leaderboard." },
   ];
   const tiers = [
     { l: "Easy", p: 100, range: "25–100", c: "#4CAF7D" },
@@ -1132,8 +1225,19 @@ function RulesTab() {
           </div>
         ))}
       </div>
-      <div style={s.label}>Point values</div>
-      <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, overflow: "hidden", marginTop: 8, marginBottom: 24 }}>
+      <div style={s.label}>Scoring</div>
+      <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.25)", borderRadius: 10, padding: "14px 16px", marginTop: 8, marginBottom: 10, display: "flex", alignItems: "center", gap: 14 }}>
+        <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>⚡</span>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: "0.85rem", color: GOLD, marginBottom: 4 }}>Speed Bonus</div>
+          <div style={{ fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 2 }}>
+          Answer within 15 seconds for full points.<br />
+          Every second after costs 1%.<br />
+          Minimum floor of 25%.
+        </div>
+        </div>
+      </div>
+      <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, overflow: "hidden", marginBottom: 24 }}>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)" }}>
           {tiers.map((t, i) => (
             <div key={t.l} style={{ padding: "13px 8px", textAlign: "center", borderRight: i < 3 ? `1px solid ${SURFACE3}` : "none" }}>
@@ -1143,9 +1247,6 @@ function RulesTab() {
               <div style={{ ...s.mono, fontSize: "0.6rem", color: t.c, marginTop: 5, opacity: 0.8 }}>{t.range}</div>
             </div>
           ))}
-        </div>
-        <div style={{ borderTop: `1px solid ${SURFACE3}`, padding: "8px 13px" }}>
-          <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>⚡ Full points within 15s · decays over time · 25% floor</span>
         </div>
       </div>
       <div style={s.label}>Weekly schedule</div>
