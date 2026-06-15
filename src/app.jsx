@@ -445,7 +445,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
       <div style={{ textAlign: "center", marginBottom: 24 }}>
         <div style={{ ...s.icon, width: 52, height: 52, fontSize: "1.7rem", margin: "0 auto 12px", borderWidth: 3 }}>?</div>
         <div style={{ fontFamily: SERIF, fontSize: "1.6rem", fontWeight: 700, marginBottom: 6 }}>WhatIs<span style={{ color: GOLD, fontStyle: "italic" }}>...</span></div>
-        <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>One question. Every morning. Top scorer wins $100.</div>
+        <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>One Question. Every Morning. Monthly Prizes.</div>
       </div>
       <div style={s.card}>
         <div style={s.accent} />
