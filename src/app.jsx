@@ -799,7 +799,7 @@ function LBHeader() {
   const hStyle = { ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.05em", lineHeight: 1.2 };
   return (
     <div style={{ display: "grid", gridTemplateColumns: LB_COLS, alignItems: "end", gap: 8, padding: "0 14px 7px" }}>
-      <div style={{ ...hStyle, gridColumn: "1 / 3", textAlign: "left" }}>Player</div>
+      <div style={{ ...hStyle, gridColumn: "1 / 3", textAlign: "left", fontSize: "0.82rem" }}>Player</div>
       <div style={{ ...hStyle, textAlign: "right" }}>Today's Questions?</div>
       <div style={{ ...hStyle, textAlign: "right" }}>Monthly Score</div>
     </div>
@@ -930,18 +930,22 @@ function WinnersTab() {
 function LeaderboardTab({ leaderboard, user, submissions }) {
   return (
     <div>
-      <div style={{ ...s.label, fontSize: "1rem" }}>Monthly Leaderboard & Prize</div>
-      <div style={s.h2}>{new Date().toLocaleString("default", { month: "long" })} {new Date().getFullYear()}</div>
-      {(() => {
-        const playerCount = orderBoard(leaderboard).real.length;
-        return (
-          <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "7px 15px", marginBottom: 14 }}>
-            <span style={{ fontSize: "0.9rem" }}>👥</span>
-            <span style={{ fontFamily: SERIF, fontSize: "1.1rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{playerCount}</span>
-            <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.07em" }}>player{playerCount !== 1 ? "s" : ""} competing this month</span>
-          </div>
-        );
-      })()}
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
+        <div>
+          <div style={{ ...s.label, fontSize: "1rem" }}>Monthly Leaderboard & Prize</div>
+          <div style={{ ...s.h2, marginBottom: 0 }}>{new Date().toLocaleString("default", { month: "long" })} {new Date().getFullYear()}</div>
+        </div>
+        {(() => {
+          const playerCount = orderBoard(leaderboard).real.length;
+          return (
+            <div style={{ display: "inline-flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "7px 15px" }}>
+              <span style={{ fontSize: "0.9rem" }}>👥</span>
+              <span style={{ fontFamily: SERIF, fontSize: "1.1rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{playerCount}</span>
+              <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.07em" }}>player{playerCount !== 1 ? "s" : ""} competing this month</span>
+            </div>
+          );
+        })()}
+      </div>
       <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 10, padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
         <div>
           <div style={{ ...s.mono, fontSize: "1rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
@@ -2188,6 +2192,12 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 <div style={{ ...s.label, fontSize: "0.72rem", color: isToday ? GOLD : TEXT_SEC, marginBottom: 4 }}>{label}</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1.2 }}>{fmtFullDate(dateObj)}</div>
                 <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginTop: 3, marginBottom: 9, textTransform: "uppercase", letterSpacing: "0.06em" }}>{monthLabel} · Day {dayNum}</div>
+                {!isToday && q && (
+                  <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 7, padding: "8px 12px", marginBottom: 10, display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span>🕕</span>
+                    <span>Goes live {dateObj.toLocaleDateString("en-US", { weekday: "long", month: "long", day: "numeric" })} at <strong>6:00 AM EST</strong></span>
+                  </div>
+                )}
                 {q ? (
                   <div style={s.card}>
                     <div style={s.accent} />
