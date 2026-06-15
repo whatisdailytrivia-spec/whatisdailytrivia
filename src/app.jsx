@@ -599,8 +599,7 @@ function PlayTab({ user, setUser, users, saveUsers, question, submissions, setSu
               { v: history.totalCorrect, l: "Correct" },
               { v: history.totalAnswered > 0 ? `${Math.round((history.totalCorrect / history.totalAnswered) * 100)}%` : "—", l: "Accuracy" },
               { v: history.bestStreak || 0, l: "Best streak 🔥" },
-              { v: history.goldCorrects || 0, l: "🥇 First" },
-              { v: (history.silverCorrects || 0) + (history.bronzeCorrects || 0), l: "🥈🥉 2nd/3rd" },
+              { v: history.goldCorrects || 0, l: "⚡ First correct" },
             ].map((x, i) => (
               <div key={i} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "11px 13px" }}>
                 <div style={{ fontFamily: SERIF, fontSize: "1.2rem", fontWeight: 700, color: OFF_WHITE }}>{x.v}</div>
@@ -643,9 +642,6 @@ function LBRow({ entry, rank, isMe }) {
           {entry.username}
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
-          {entry.goldCorrects > 0 && <span style={{ ...s.mono, fontSize: "0.65rem", color: "#FFD700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.2)", borderRadius: 100, padding: "1px 5px" }}>🥇{entry.goldCorrects}</span>}
-          {entry.silverCorrects > 0 && <span style={{ ...s.mono, fontSize: "0.65rem", color: "#C0C0C0", background: "rgba(192,192,192,0.1)", border: "1px solid rgba(192,192,192,0.2)", borderRadius: 100, padding: "1px 5px" }}>🥈{entry.silverCorrects}</span>}
-          {entry.bronzeCorrects > 0 && <span style={{ ...s.mono, fontSize: "0.65rem", color: "#CD7F32", background: "rgba(205,127,50,0.1)", border: "1px solid rgba(205,127,50,0.2)", borderRadius: 100, padding: "1px 5px" }}>🥉{entry.bronzeCorrects}</span>}
         </div>
         <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>🔥{entry.streak || 0} · {entry.correct || 0}/{entry.answered || 0} correct</div>
       </div>
@@ -1022,7 +1018,7 @@ function GroupsTab({ user, setUser, saveUsers, users }) {
 function RulesTab() {
   const rules = [
     { icon: "📅", text: "One question drops daily. One submission per account." },
-    { icon: "🥇", text: "First correct answer receives 10% bonus. Second gets 5%. Third gets 3%." },
+    { icon: "⚡", text: "Answer faster to earn more — full points within the 15-second grace period, then points decay over time with a 25% floor." },
     { icon: "🏆", text: "Highest score at month end wins. Ties broken by fastest average answer time." },
     { icon: "💰", text: "$100 Visa Gift Card awarded monthly. Winner contacted via Instagram DM within 48 hours." },
     { icon: "📲", text: "Must follow @whatis_dailytrivia on Instagram to claim the prize." },
@@ -1030,10 +1026,10 @@ function RulesTab() {
     { icon: "👥", text: "Create or join private Groups for a side competition with friends and family." },
   ];
   const tiers = [
-    { l: "Easy", p: 100, b: "+10", c: "#4CAF7D" },
-    { l: "Medium", p: 200, b: "+20", c: "#6495ED" },
-    { l: "Hard", p: 300, b: "+30", c: GOLD },
-    { l: "Expert", p: 400, b: "+40", c: "#E05C5C" },
+    { l: "Easy", p: 100, range: "25–100", c: "#4CAF7D" },
+    { l: "Medium", p: 200, range: "50–200", c: "#6495ED" },
+    { l: "Hard", p: 300, range: "75–300", c: GOLD },
+    { l: "Expert", p: 400, range: "100–400", c: "#E05C5C" },
   ];
   const sched = [
     { d: "Mon", cat: "Finance",           c: GOLD },
@@ -1063,13 +1059,13 @@ function RulesTab() {
             <div key={t.l} style={{ padding: "13px 8px", textAlign: "center", borderRight: i < 3 ? `1px solid ${SURFACE3}` : "none" }}>
               <div style={{ ...s.mono, fontSize: "0.62rem", letterSpacing: "0.1em", textTransform: "uppercase", color: t.c, marginBottom: 6 }}>{t.l}</div>
               <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{t.p}</div>
-              <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 3 }}>pts</div>
-              <div style={{ ...s.mono, fontSize: "0.62rem", color: t.c, marginTop: 6, opacity: 0.85 }}>⚡ {t.b}</div>
+              <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 3 }}>pts max</div>
+              <div style={{ ...s.mono, fontSize: "0.6rem", color: t.c, marginTop: 5, opacity: 0.8 }}>{t.range}</div>
             </div>
           ))}
         </div>
         <div style={{ borderTop: `1px solid ${SURFACE3}`, padding: "8px 13px" }}>
-          <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>🥇+10% · 🥈+5% · 🥉+3% for first three correct answers</span>
+          <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>⚡ Full points within 15s · decays over time · 25% floor</span>
         </div>
       </div>
       <div style={s.label}>Weekly schedule</div>
@@ -1644,9 +1640,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                             { v: h.totalPoints?.toLocaleString() || 0, l: "Total pts", gold: true },
                             { v: h.bestStreak || 0, l: "Best streak" },
                             { v: avgTime ? `${avgTime}s` : "—", l: "Avg time" },
-                            { v: h.goldCorrects || 0,   l: "🥇" },
-                            { v: h.silverCorrects || 0, l: "🥈" },
-                            { v: h.bronzeCorrects || 0, l: "🥉" },
+                            { v: h.goldCorrects || 0, l: "⚡ First" },
                           ].map((x,i) => (
                             <div key={i} style={{ textAlign: "center" }}>
                               <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700,
