@@ -1298,6 +1298,8 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [banterOpen, setBanterOpen] = useState(false);
   const [banterUnread, setBanterUnread] = useState(0);
+  const [inviteOpen, setInviteOpen] = useState(false);
+  const [inviteCopied, setInviteCopied] = useState(false);
 
   // Poll the active group's chat for unread messages (badge on the Group Banter button).
   useEffect(() => {
@@ -1433,7 +1435,34 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
     const isCreator = g.createdBy === user.username;
     return (
       <div>
-        <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); }} style={{ ...s.btnSec, marginBottom: 20, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 20 }}>
+          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+          <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
+            {/* Banter */}
+            <button onClick={() => setBanterOpen(true)} title="Group Banter" style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${banterUnread > 0 ? "rgba(224,92,92,0.55)" : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+              💬 Banter
+              {banterUnread > 0 && (
+                <span style={{ position: "absolute", top: -7, right: -6, minWidth: 17, height: 17, padding: "0 4px", borderRadius: 100, background: "#E05C5C", color: "#fff", fontSize: "0.62rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SANS, boxShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>{banterUnread > 9 ? "9+" : banterUnread}</span>
+              )}
+            </button>
+            {/* Invite */}
+            <div style={{ position: "relative" }}>
+              <button onClick={() => { setInviteOpen(o => !o); setInviteCopied(false); }} title="Invite code" style={{ display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${inviteOpen ? GOLD : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: inviteOpen ? GOLD : OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+                🔗 Invite
+              </button>
+              {inviteOpen && (
+                <>
+                  <div onClick={() => setInviteOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
+                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 301, width: 230, background: SURFACE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)" }}>
+                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Invite code — share to add members</div>
+                    <div style={{ ...s.mono, fontSize: "1.4rem", fontWeight: 700, color: GOLD, letterSpacing: "0.18em", textAlign: "center", marginBottom: 11 }}>{g.code}</div>
+                    <button onClick={() => { try { navigator.clipboard.writeText(g.code); } catch (e) {} setInviteCopied(true); }} style={{ ...s.btn, width: "100%", fontSize: "0.78rem", padding: "8px" }}>{inviteCopied ? "✓ Copied!" : "Copy code"}</button>
+                  </div>
+                </>
+              )}
+            </div>
+          </div>
+        </div>
         <div style={s.label}>Group leaderboard</div>
 
         {/* Group name + rename */}
@@ -1460,24 +1489,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
           </div>
         )}
 
-        <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 16 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
-
-        {/* Invite code */}
-        <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: "11px 16px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-          <div style={{ fontSize: "0.8rem", color: TEXT_SEC }}>Invite code — share to add members</div>
-          <div style={{ ...s.mono, fontSize: "1rem", fontWeight: 700, color: GOLD, letterSpacing: "0.15em" }}>{g.code}</div>
-        </div>
-
-        {/* Past monthly winners */}
-        <GroupPastWinners code={g.code} />
-
-        {/* Group Banter chat */}
-        <button onClick={() => setBanterOpen(true)} style={{ position: "relative", width: "100%", display: "flex", alignItems: "center", justifyContent: "center", gap: 8, background: SURFACE2, border: `1px solid ${banterUnread > 0 ? "rgba(224,92,92,0.5)" : SURFACE3}`, borderRadius: 8, padding: "12px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", cursor: "pointer", marginBottom: 20 }}>
-          💬 Group Banter
-          {banterUnread > 0 && (
-            <span style={{ position: "absolute", top: -8, right: 12, minWidth: 19, height: 19, padding: "0 5px", borderRadius: 100, background: "#E05C5C", color: "#fff", fontSize: "0.66rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SANS, boxShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>{banterUnread > 9 ? "9+" : banterUnread}</span>
-          )}
-        </button>
+        <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 20 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
 
         {/* Leaderboard */}
         {(() => {
@@ -1491,8 +1503,13 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
           </>;
         })()}
 
+        {/* Past monthly winners */}
+        <div style={{ marginTop: 28 }}>
+          <GroupPastWinners code={g.code} />
+        </div>
+
         {/* Leave group */}
-        <div style={{ marginTop: 28, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
+        <div style={{ marginTop: 8, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
           {confirmLeave ? (
             <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.25)", borderRadius: 8, padding: "14px 16px" }}>
               <div style={{ fontSize: "0.85rem", color: OFF_WHITE, marginBottom: 12 }}>Are you sure you want to leave <strong>{g.name}</strong>? Your scores will remain on the leaderboard but you'll stop competing here.</div>
