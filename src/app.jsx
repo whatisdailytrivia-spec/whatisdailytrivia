@@ -188,8 +188,9 @@ const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}
 
 const SAMPLE = { id: "q1", question: "This financial instrument allows investors to pool capital and gain exposure to real estate without directly owning property — and is required by law to distribute at least 90% of its taxable income to shareholders.", answer: "REIT", displayAnswer: "A Real Estate Investment Trust (REIT)", category: "Finance", points: 200 };
 
-const todayKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}-${String(d.getDate()).padStart(2,"0")}`; };
-const monthKey = () => { const d = new Date(); return `${d.getFullYear()}-${String(d.getMonth()+1).padStart(2,"0")}`; };
+const etDateStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const todayKey = () => etDateStr();           // Eastern — matches the server's question/scoring day
+const monthKey = () => etDateStr().slice(0, 7);
 const daysLeft = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate() - d.getDate(); };
 const normalize = (s) => s.toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
 const checkAnswer = (u, c, aliases = []) => {
@@ -466,7 +467,7 @@ export default function App() {
           // else falls back to the sign-in / create-account screen.
           const shownTab = (!user && tab !== "leaderboard") ? "play" : tab;
           return <>
-        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
+        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} setLeaderboard={setLeaderboard} saveLBEntry={saveLBEntry} />}
         {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
         {shownTab === "winners"     && <WinnersTab />}
         {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
@@ -482,7 +483,7 @@ export default function App() {
   );
 }
 
-function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, saveLBEntry }) {
+function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ username: "", email: "", password: "", state: "" });
   const [answer, setAnswer] = useState("");
@@ -546,6 +547,8 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     localStorage.setItem(`start:${todayKey()}:${user.username}`, String(now));
     setViewStart(now);
     setElapsed(0);
+    // Anchor the authoritative clock on the server (first reveal wins; can't be reset)
+    atomicPost("/api/start", { username: user.username }).catch(() => {});
   };
 
   const doAuth = async () => {
@@ -586,7 +589,43 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     setForm({ username: "", email: "", password: "", state: "" });
   };
 
+  // Primary path: the server grades, times, scores, and records everything.
   const submit = async () => {
+    if (!answer.trim() || submitting) return;
+    if (!question || question.id === "q1" || !question.points) return;
+    const localKey = `sub:${todayKey()}:${user.username}`;
+    if (localStorage.getItem(localKey) || submissions[user.username]) return;
+    setSubmitting(true);
+    let resp;
+    try {
+      resp = await atomicPost("/api/grade", { username: user.username, guess: answer });
+    } catch (e) {
+      // Grading endpoint not available yet (deploy gap) — fall back to the legacy client path
+      setSubmitting(false);
+      if (question.answer) return legacySubmit();
+      setError("Please refresh and try again.");
+      return;
+    }
+    if (!resp || resp.ok === false) {
+      setSubmitting(false);
+      if (question.answer && resp && (resp.error === "no_question" || resp.error === "not_gradable")) return legacySubmit();
+      setError("Couldn't submit — please try again.");
+      return;
+    }
+    const subWithReveal = { ...(resp.result || {}), displayAnswer: resp.displayAnswer };
+    setSubmissions(prev => ({ ...prev, [user.username]: subWithReveal }));
+    localStorage.setItem(localKey, JSON.stringify(subWithReveal));
+    const nu = { ...user, streak: resp.streak != null ? resp.streak : user.streak };
+    setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
+    if (resp.history) setHistory(resp.history);
+    setResult(subWithReveal);
+    // Reflect the server-side writes in the local standings
+    try { const lbR = await apiStorage.get(`leaderboard:${monthKey()}`).catch(() => null); if (lbR) setLeaderboard(JSON.parse(lbR.value)); } catch (e) {}
+    setSubmitting(false);
+  };
+
+  // Legacy fallback — only used if /api/grade is unavailable during a deploy gap.
+  const legacySubmit = async () => {
     if (!answer.trim() || submitting) return;
     // Hard block — never award points on the sample/placeholder question
     if (!question || question.id === "q1" || !question.points) return;
@@ -875,7 +914,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               </div>
               <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(76,175,125,0.08)", border: "1px solid rgba(76,175,125,0.25)", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
-                <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{question?.displayAnswer || question?.answer}</div>
+                <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || question?.displayAnswer || question?.answer}</div>
               </div>
             </div>
           );
