@@ -338,15 +338,18 @@ export default function App() {
               {[
                 { id: "play",        label: "Today's Question" },
                 { id: "leaderboard", label: "Global Leaderboard" },
-                { id: "groups",      label: "Groups" },
-                { id: "account",     label: "My Account" },
+                ...(user ? [
+                  { id: "groups",      label: "Groups" },
+                  { id: "account",     label: "My Account" },
+                ] : []),
               ].map(t => (
                 <button key={t.id} style={{ ...s.tab, ...(tab === t.id ? s.tabActive : {}) }} onClick={() => goTab(t.id)}>
                   {t.label}
                 </button>
               ))}
 
-              {/* Hamburger — Archive, Rules, Contact, Admin */}
+              {/* Hamburger — Archive, Rules, Contact, Admin (signed-in only) */}
+              {user && (
               <div style={{ position: "relative" }}>
                 <button
                   onClick={() => setMoreOpen(o => !o)}
@@ -395,6 +398,7 @@ export default function App() {
                   </>
                 )}
               </div>
+              )}
             </div>
 
             {user && (
@@ -410,7 +414,7 @@ export default function App() {
       {/* Mobile dropdown menu */}
       {isMobile && menuOpen && (
         <div style={{ background: SURFACE, borderBottom: `1px solid ${SURFACE3}`, zIndex: 99, position: "sticky", top: 61 }}>
-          {TABS.map(t => (
+          {(user ? TABS : TABS.filter(t => t.id === "play" || t.id === "leaderboard")).map(t => (
             <button key={t.id} onClick={() => goTab(t.id)} style={{ display: "block", width: "100%", textAlign: "left", padding: "14px 20px", background: tab === t.id ? SURFACE2 : "transparent", border: "none", borderBottom: `1px solid ${SURFACE3}`, color: tab === t.id ? GOLD : OFF_WHITE, fontFamily: SANS, fontSize: "0.9rem", cursor: "pointer" }}>
               {t.label}
             </button>
@@ -424,15 +428,22 @@ export default function App() {
       )}
 
       <div style={s.main}>
-        {tab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
-        {tab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
-        {tab === "winners"     && <WinnersTab />}
-        {tab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
-        {tab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
-        {tab === "archive"     && <ArchiveTab />}
-        {tab === "rules"       && <RulesTab />}
-        {tab === "contact"     && <ContactTab />}
-        {tab === "admin"       && <AdminTab adminUnlocked={adminUnlocked} setAdminUnlocked={setAdminUnlocked} question={question} setQuestion={setQuestion} />}
+        {(() => {
+          // Logged-out visitors may view only the Global Leaderboard; everything
+          // else falls back to the sign-in / create-account screen.
+          const shownTab = (!user && tab !== "leaderboard") ? "play" : tab;
+          return <>
+        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
+        {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
+        {shownTab === "winners"     && <WinnersTab />}
+        {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
+        {shownTab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
+        {shownTab === "archive"     && <ArchiveTab />}
+        {shownTab === "rules"       && <RulesTab />}
+        {shownTab === "contact"     && <ContactTab />}
+        {shownTab === "admin"       && <AdminTab adminUnlocked={adminUnlocked} setAdminUnlocked={setAdminUnlocked} question={question} setQuestion={setQuestion} />}
+          </>;
+        })()}
       </div>
     </div>
   );
