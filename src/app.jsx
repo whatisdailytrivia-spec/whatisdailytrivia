@@ -953,7 +953,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.82rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
         return (
           <div style={{ margin: "4px 0 18px" }}>
-            <button onClick={() => setRefOpen(o => !o)} style={{ width: "100%", background: refOpen ? "transparent" : GOLD, color: refOpen ? GOLD : BLACK, border: refOpen ? `1px solid ${GOLD}` : "none", borderRadius: 10, padding: "13px 18px", fontFamily: SANS, fontWeight: 700, fontSize: "0.95rem", cursor: "pointer" }}>
+            <button onClick={() => setRefOpen(o => !o)} style={{ width: "100%", background: BLACK, color: OFF_WHITE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "13px 18px", fontFamily: SANS, fontWeight: 600, fontSize: "0.95rem", cursor: "pointer" }}>
               Refer a Friend
             </button>
             {refOpen && (
