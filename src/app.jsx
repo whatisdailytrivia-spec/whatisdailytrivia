@@ -1956,6 +1956,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [perfDiff, setPerfDiff] = useState("All"); // difficulty filter for cross-tab
   const [acctView, setAcctView] = useState(false);     // show the New Accounts page
   const [acctRange, setAcctRange] = useState("24h");   // 24h | 7d | all
+  const [openTip, setOpenTip] = useState(null);        // key of the metric whose info note is open
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -2498,13 +2499,21 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     {[
                       [`${mau}`, "Active · 30d"],
                       [`${stickiness}%`, "Stickiness", "Stickiness = daily active ÷ monthly active (DAU/MAU). Of the accounts that play in a 30-day window, the share that show up on a given day — i.e. how habitual the game is. 100% means everyone who played this month also played today. Note: with a small user base where DAU and MAU are close, this runs high and is noisy; it sharpens as monthly numbers grow."],
-                      [avgPerUser.toFixed(1), "Answers / acct"],
                       [`${playedAny.length}/${totalUsers}`, "Ever played"],
                       [`${dormant}`, "Never played"],
                     ].map(([v, l, tip], i) => (
-                      <div key={i} title={tip || undefined} style={{ display: "flex", alignItems: "baseline", gap: 6, cursor: tip ? "help" : "default" }}>
+                      <div key={i} style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 6, cursor: tip ? "pointer" : "default" }}
+                        onClick={tip ? () => setOpenTip(openTip === l ? null : l) : undefined}>
                         <span style={{ ...s.mono, fontSize: "0.88rem", fontWeight: 600, color: OFF_WHITE }}>{v}</span>
-                        <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}{tip ? " ⓘ" : ""}</span>
+                        <span style={{ ...s.mono, fontSize: "0.6rem", color: openTip === l ? GOLD : TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}{tip ? " ⓘ" : ""}</span>
+                        {tip && openTip === l && (
+                          <>
+                            <div onClick={(e) => { e.stopPropagation(); setOpenTip(null); }} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
+                            <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 301, width: 280, maxWidth: "80vw", background: SURFACE2, border: `1px solid ${GOLD}`, borderRadius: 8, padding: "11px 13px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", fontFamily: SANS, fontSize: "0.72rem", lineHeight: 1.5, color: TEXT_SEC, textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
+                              {tip}
+                            </div>
+                          </>
+                        )}
                       </div>
                     ))}
                   </div>
@@ -2802,8 +2811,11 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       {/* ── USERS ────────────────────────────────────────────────────────── */}
       {section === "users" && (
         <div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.85rem", marginBottom: 14 }}>
-            {Object.keys(adminUsers).length} registered user{Object.keys(adminUsers).length !== 1 ? "s" : ""}. Click any row to edit.
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, marginBottom: 14, flexWrap: "wrap" }}>
+            <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>
+              {Object.keys(adminUsers).length} registered user{Object.keys(adminUsers).length !== 1 ? "s" : ""}. Click any row to edit.
+            </div>
+            <button onClick={() => { setAcctRange("24h"); setAcctView(true); setSection("analytics"); }} style={{ padding: "6px 12px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: `1px solid ${GOLD}`, background: "rgba(201,168,76,0.12)", color: GOLD, whiteSpace: "nowrap", flexShrink: 0 }}>👥 New accounts · 24h →</button>
           </div>
           <div style={{ display: "flex", gap: 8, marginBottom: 14, flexWrap: "wrap" }}>
             <input style={{ ...s.input, flex: 1, minWidth: 160 }} placeholder="Search by name or email..." value={userSearch} onChange={e => setUserSearch(e.target.value)} />
