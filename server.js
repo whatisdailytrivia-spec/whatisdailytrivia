@@ -263,10 +263,19 @@ app.get("/api/storage/:key", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Server-only keys: the client never writes these (cred: is written by the auth
+// routes, halloffame: by the monthly cron, launch_date is read-only on the client).
+// Blocking them here closes the open-write hole on /api/storage that would otherwise
+// let a crafted request overwrite a credential (account takeover), forge a past
+// monthly winner, or tamper with the analytics anchor.
+const NO_CLIENT_WRITE = ["cred:", "halloffame:", "launch_date"];
+
 app.post("/api/storage", async (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: "key is required" });
+    if (NO_CLIENT_WRITE.some((pre) => key === pre || key.indexOf(pre) === 0))
+      return res.status(403).json({ error: "Protected key" });
     await dbSet(key, value);
     res.json({ key, value });
   } catch (e) { res.status(500).json({ error: e.message }); }
