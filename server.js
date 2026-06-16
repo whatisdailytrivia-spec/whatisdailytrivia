@@ -64,42 +64,49 @@ const getESTDate = () =>
   }).format(new Date());
 
 const getESTMonthKey = () => getESTDate().slice(0, 7);
+const etHour = () => parseInt(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }).format(new Date()), 10);
 
 // ─── Daily cron — 6:00 AM Eastern ────────────────────────────────────────────
 
-cron.schedule("0 6 * * *", async () => {
+// Idempotent daily publish — shared by the in-process cron and the external
+// /api/publish trigger. Safe to call repeatedly: it won't publish before 6am ET
+// (unless forced) and won't republish once today's question already exists.
+async function publishDaily(force = false) {
   const dateStr  = getESTDate();
   const monthKey = getESTMonthKey();
   const dayNum   = parseInt(dateStr.slice(8), 10);
-  console.log(`[CRON daily] Running for ${dateStr} (day ${dayNum})`);
   await finalizeAnalytics();
-  try {
-    const override = await dbGet(`qoverride:${dateStr}`);
-    if (override) {
-      await dbSet(`question:${dateStr}`, override);
-      await updateArchive(dateStr, JSON.parse(override));
-      await dbDelete("cron_alert");
-      return console.log(`[CRON daily] Published override for ${dateStr}`);
-    }
-    const bankRaw = await dbGet(`question_bank:${monthKey}`);
-    if (!bankRaw) return await setCronAlert("no_bank", `No bank for ${monthKey}`, dateStr);
-    const bank     = JSON.parse(bankRaw);
-    const question = bank[dayNum - 1];
-    if (!question || !question.question || question.answer === "N/A" ||
-        question.question === "Past question — not published.")
-      return await setCronAlert("no_question", `No valid question at index ${dayNum - 1}`, dateStr);
-    const published = { ...question, id: `q_${dateStr}`, publishedAt: Date.now() };
-    await dbSet(`question:${dateStr}`, JSON.stringify(published));
-    await updateArchive(dateStr, question);
+  if (!force && etHour() < 6) return { ok: true, skipped: "before_6am_ET", date: dateStr };
+  if (await dbGet(`question:${dateStr}`)) return { ok: true, already: true, date: dateStr };
+  const override = await dbGet(`qoverride:${dateStr}`);
+  if (override) {
+    await dbSet(`question:${dateStr}`, override);
+    await updateArchive(dateStr, JSON.parse(override));
     await dbDelete("cron_alert");
-    const daysLeft = bank.filter((q, i) => i >= dayNum && q && q.question &&
-      q.answer !== "N/A" && q.question !== "Past question — not published.").length;
-    if (daysLeft <= 3) await setCronAlert("bank_low", `Only ${daysLeft} question(s) left in ${monthKey}`, dateStr);
-    console.log(`[CRON daily] Published "${question.answer}" for ${dateStr}`);
-  } catch (e) {
-    console.error("[CRON daily] Error:", e.message);
-    await setCronAlert("error", e.message, dateStr);
+    return { ok: true, published: "override", date: dateStr };
   }
+  const bankRaw = await dbGet(`question_bank:${monthKey}`);
+  if (!bankRaw) { await setCronAlert("no_bank", `No bank for ${monthKey}`, dateStr); return { ok: false, error: "no_bank", date: dateStr }; }
+  const bank     = JSON.parse(bankRaw);
+  const question = bank[dayNum - 1];
+  if (!question || !question.question || question.answer === "N/A" ||
+      question.question === "Past question — not published.") {
+    await setCronAlert("no_question", `No valid question at index ${dayNum - 1}`, dateStr);
+    return { ok: false, error: "no_question", date: dateStr };
+  }
+  const published = { ...question, id: `q_${dateStr}`, publishedAt: Date.now() };
+  await dbSet(`question:${dateStr}`, JSON.stringify(published));
+  await updateArchive(dateStr, question);
+  await dbDelete("cron_alert");
+  const daysLeft = bank.filter((q, i) => i >= dayNum && q && q.question &&
+    q.answer !== "N/A" && q.question !== "Past question — not published.").length;
+  if (daysLeft <= 3) await setCronAlert("bank_low", `Only ${daysLeft} question(s) left in ${monthKey}`, dateStr);
+  return { ok: true, published: question.answer, date: dateStr, daysLeft };
+}
+
+cron.schedule("0 6 * * *", async () => {
+  try { const r = await publishDaily(); console.log(`[CRON daily] ${JSON.stringify(r)}`); }
+  catch (e) { console.error("[CRON daily] Error:", e.message); await setCronAlert("error", e.message, getESTDate()); }
 }, { timezone: "America/New_York" });
 
 // ─── Monthly cron — midnight on the 1st ──────────────────────────────────────
@@ -578,6 +585,40 @@ app.post("/api/change-password", async (req, res) => {
     await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(newPassword), email: rec.email || "" }));
     await scrubPassword(username);
     res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Scheduled-task endpoints (token-protected; called by GitHub Actions) ─────
+const checkTaskToken = (req) => {
+  const want = process.env.ADMIN_TASK_TOKEN;
+  if (!want) return false; // fail closed if unconfigured
+  const got = String(req.headers["x-task-token"] || "");
+  const a = Buffer.from(got), b = Buffer.from(String(want));
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+
+// External daily drop — idempotent, Eastern-correct. Fires the question even if
+// the in-process cron missed (e.g. instance asleep), and wakes the instance.
+app.post("/api/publish", async (req, res) => {
+  if (!checkTaskToken(req)) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const force = req.query.force === "1" || (req.body && req.body.force === true);
+    res.json(await publishDaily(force));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Full backup dump — token-protected; the backup workflow encrypts the result.
+app.get("/api/export", async (req, res) => {
+  if (!checkTaskToken(req)) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const keys = await dbList("");
+    const data = {};
+    for (let i = 0; i < keys.length; i += 100) {
+      const chunk = keys.slice(i, i + 100);
+      const vals = await redis(["MGET", ...chunk]);
+      chunk.forEach((k, j) => { data[k] = vals[j]; });
+    }
+    res.json({ exportedAt: new Date().toISOString(), date: getESTDate(), count: keys.length, data });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
