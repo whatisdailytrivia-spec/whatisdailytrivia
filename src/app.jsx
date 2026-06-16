@@ -2714,7 +2714,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                       <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 5 }}>Daily participation</div>
                     </div>
                   </div>
-                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.totalAccounts ? Math.round((p.activeUsers / p.totalAccounts) * 100) : 0} unit="%" yLabel="Participation" last={`${partToday}% today`} />
+                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.date === "2026-06-13" ? 0 : (p.totalAccounts ? Math.min(100, Math.round((p.activeUsers / p.totalAccounts) * 100)) : 0)} unit="%" yLabel="Participation" last={`${partToday}% today`} />
                   <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
                     {[
                       [`${mau}`, "Active · 30d"],
