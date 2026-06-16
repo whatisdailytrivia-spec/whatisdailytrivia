@@ -2250,6 +2250,11 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [acctView, setAcctView] = useState(false);     // show the New Accounts page
   const [acctRange, setAcctRange] = useState("24h");   // 24h | 7d | all
   const [openTip, setOpenTip] = useState(null);        // key of the metric whose info note is open
+  // ── Engagement by time of day ──
+  const [todScope, setTodScope]     = useState("7d");        // single | 7d | 30d | all
+  const [todDate, setTodDate]       = useState(todayKey());  // selected date when scope = single
+  const [todData, setTodData]       = useState({});          // date -> 48-slot (30-min) answer counts
+  const [todLoading, setTodLoading] = useState(false);
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -2284,6 +2289,50 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const tomorrowMonthLabel = estTomorrow.toLocaleString("default", { month: "long", year: "numeric" });
 
   useEffect(() => { if (adminUnlocked) loadAdminData(); }, [adminUnlocked]);
+
+  // ── Time-of-day engagement: fetch submissions:<date> for the selection and
+  // bucket each answer's timestamp into 48 half-hour slots in Eastern time. ──
+  const todKeyOf = (d) => `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}-${String(d.getDate()).padStart(2, "0")}`;
+  const todLastKeys = (n) => { const o = []; for (let i = 0; i < n; i++) { const d = new Date(); d.setDate(d.getDate() - i); o.push(todKeyOf(d)); } return o; };
+  const todBucketsFrom = (subsObj) => {
+    const b = new Array(48).fill(0);
+    Object.values(subsObj || {}).forEach(sx => {
+      if (!sx || !sx.time) return;
+      try {
+        const parts = new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", minute: "2-digit", hour12: false }).formatToParts(new Date(sx.time));
+        const hh = parseInt(parts.find(p => p.type === "hour").value, 10) % 24;
+        const mm = parseInt(parts.find(p => p.type === "minute").value, 10);
+        b[hh * 2 + (mm >= 30 ? 1 : 0)]++;
+      } catch (e) {}
+    });
+    return b;
+  };
+
+  useEffect(() => {
+    if (!adminUnlocked) return;
+    const need = todScope === "single" ? [todDate]
+      : todScope === "7d" ? todLastKeys(7)
+      : todScope === "30d" ? todLastKeys(30)
+      : [...new Set((analyticsSeries || []).map(p => p.date).concat(todayKey()))]; // all
+    const missing = [...new Set(need)].filter(d => d && !(d in todData));
+    if (!missing.length) return;
+    let cancelled = false;
+    (async () => {
+      setTodLoading(true);
+      const res = await Promise.allSettled(missing.map(d => apiStorage.get(`submissions:${d}`)));
+      if (cancelled) return;
+      const add = {};
+      missing.forEach((d, i) => {
+        let b = new Array(48).fill(0);
+        if (res[i].status === "fulfilled" && res[i].value) { try { b = todBucketsFrom(JSON.parse(res[i].value.value)); } catch (e) {} }
+        add[d] = b; // cache even when empty so we don't refetch
+      });
+      setTodData(prev => ({ ...prev, ...add }));
+      setTodLoading(false);
+    })();
+    return () => { cancelled = true; };
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [adminUnlocked, todScope, todDate, analyticsSeries]);
 
   const loadAdminData = async () => {
     try {
@@ -2787,6 +2836,82 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 ))}
               </div>
             </div>
+
+            {/* ===== ENGAGEMENT BY TIME OF DAY ===== */}
+            {(() => {
+              const need = todScope === "single" ? [todDate]
+                : todScope === "7d" ? lastKeys(7)
+                : todScope === "30d" ? lastKeys(30)
+                : [...new Set((analyticsSeries || []).map(p => p.date).concat(today))];
+              const dts = [...new Set(need)].filter(Boolean);
+              const have = dts.filter(d => Array.isArray(todData[d]));
+              const daysWithData = have.filter(d => todData[d].some(v => v > 0));
+              const agg = new Array(48).fill(0);
+              have.forEach(d => todData[d].forEach((v, i) => { agg[i] += v; }));
+              const total = agg.reduce((a, b) => a + b, 0);
+              const isAvg = todScope !== "single";
+              const divz = Math.max(1, daysWithData.length);
+              const disp = isAvg ? agg.map(v => v / divz) : agg.slice();
+              const maxV = Math.max(1, ...disp);
+              const peak = disp.reduce((mi, v, i, a) => v > a[mi] ? i : mi, 0);
+              const bLabel = (i) => { const h = Math.floor(i / 2), m = i % 2 ? 30 : 0; let hh = h % 12; if (hh === 0) hh = 12; return `${hh}:${m === 0 ? "00" : "30"}${h < 12 ? "a" : "p"}`; };
+              const xticks = [0, 6, 12, 18, 24, 30, 36, 42];
+              const fmtV = (v) => isAvg ? (Math.round(v * 10) / 10) : Math.round(v);
+              const PLOT = 120;
+              return (
+                <div>
+                  {secHead("Engagement by time of day", "When players answer (Eastern). Pick a date or average a period.", (
+                    <div style={{ display: "flex", gap: 4, flexWrap: "wrap" }}>
+                      {[["single", "Date"], ["7d", "7d avg"], ["30d", "30d avg"], ["all", "All-time avg"]].map(([k, l]) => (
+                        <button key={k} onClick={() => setTodScope(k)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: todScope === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: todScope === k ? "rgba(201,168,76,0.12)" : "transparent", color: todScope === k ? GOLD : TEXT_SEC }}>{l}</button>
+                      ))}
+                    </div>
+                  ))}
+                  {todScope === "single" && (
+                    <div style={{ marginBottom: 4 }}>
+                      <input type="date" value={todDate} max={today} onChange={e => setTodDate(e.target.value)} style={{ ...s.input, width: "auto", padding: "7px 10px", fontSize: "0.8rem", colorScheme: "dark" }} />
+                    </div>
+                  )}
+                  <div style={panel}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 6 }}>
+                      <div style={chartTitle}>{isAvg ? `Avg answers / 30 min · ${daysWithData.length} day${daysWithData.length !== 1 ? "s" : ""} w/ data` : `Answers / 30 min · ${fmtDate(todDate)}`}</div>
+                      <div style={{ ...s.mono, fontSize: "0.7rem", color: GOLD, fontWeight: 600 }}>{isAvg ? `${Math.round(total / divz)} / day avg` : `${total} total`}</div>
+                    </div>
+                    {total === 0 ? (
+                      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "16px 0 4px" }}>{todLoading ? "Loading…" : "No answers recorded for this selection yet."}</div>
+                    ) : (
+                      <>
+                        <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, marginTop: 8 }}>Peak: {bLabel(peak)}–{bLabel((peak + 1) % 48)} · {fmtV(disp[peak])}{isAvg ? " avg" : ""}</div>
+                        <div style={{ display: "flex", marginTop: 10 }}>
+                          <div style={{ width: 30, flexShrink: 0, height: PLOT, display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 6, boxSizing: "border-box" }}>
+                            {[maxV, maxV / 2, 0].map((t, i) => <span key={i} style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, lineHeight: 1 }}>{fmtV(t)}</span>)}
+                          </div>
+                          <div style={{ flex: 1, minWidth: 0 }}>
+                            <div style={{ position: "relative", height: PLOT, borderLeft: `1px solid ${SURFACE3}`, borderBottom: `1px solid ${SURFACE3}` }}>
+                              {[0.5, 1].map((g, i) => <div key={i} style={{ position: "absolute", left: 0, right: 0, bottom: `${g * 100}%`, borderTop: `1px solid ${SURFACE3}`, opacity: 0.45 }} />)}
+                              <div style={{ position: "absolute", top: 0, bottom: 0, left: `${(12 / 48) * 100}%`, borderLeft: `1px dashed rgba(201,168,76,0.55)` }} title="6:00a question drop" />
+                              <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", gap: 1, padding: "0 1px" }}>
+                                {disp.map((v, i) => (
+                                  <div key={i} title={`${bLabel(i)}: ${fmtV(v)}${isAvg ? " avg" : ""}`} style={{ flex: 1, height: "100%", display: "flex", alignItems: "flex-end" }}>
+                                    <div style={{ width: "100%", height: `${(v / maxV) * 92}%`, minHeight: v ? 2 : 0, background: i === peak ? GOLD : "#6495ED", borderRadius: "1px 1px 0 0" }} />
+                                  </div>
+                                ))}
+                              </div>
+                            </div>
+                            <div style={{ position: "relative", height: 12, marginTop: 4 }}>
+                              {xticks.map(ix => (
+                                <span key={ix} style={{ position: "absolute", left: `${(ix / 48) * 100}%`, transform: "translateX(-50%)", ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, whiteSpace: "nowrap" }}>{bLabel(ix)}</span>
+                              ))}
+                            </div>
+                            <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, textAlign: "center", marginTop: 2, textTransform: "uppercase", letterSpacing: "0.08em" }}>Time of day (ET) · ⬩ 6am drop</div>
+                          </div>
+                        </div>
+                      </>
+                    )}
+                  </div>
+                </div>
+              );
+            })()}
 
             {/* ===== USER ACCOUNT CREATION ===== */}
             {secHead("User Account Creation", "How fast the player base is growing",
