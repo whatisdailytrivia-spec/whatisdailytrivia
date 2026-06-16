@@ -229,6 +229,11 @@ const stripUserSecrets = (value) => {
     return JSON.stringify(u);
   } catch (e) { return value; }
 };
+// Remove the answer from a question/archive payload before it leaves the server.
+const stripAnswer = (value) => {
+  try { const o = JSON.parse(value); delete o.answer; delete o.displayAnswer; delete o.aliases; return JSON.stringify(o); }
+  catch (e) { return value; }
+};
 // Null out a legacy plaintext password at rest (atomic, scoped to one record).
 const scrubPassword = (username) =>
   evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ password: null }), "merge"]);
@@ -242,6 +247,11 @@ app.get("/api/storage/:key", async (req, res) => {
     let value = await dbGet(key);
     if (value === null) return res.status(404).json({ error: "Not found" });
     if (key === "users") value = stripUserSecrets(value);
+    else if (key.indexOf("question:") === 0) value = stripAnswer(value);
+    else if (key.indexOf("archive:") === 0) {
+      const d = key.slice("archive:".length);
+      if (d >= getESTDate()) value = stripAnswer(value);   // reveal only past days' answers
+    }
     res.json({ key, value });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -358,6 +368,155 @@ app.post("/api/append", async (req, res) => {
     const { key, value } = req.body;
     if (!key || value == null) return res.status(400).json({ error: "key and value required" });
     res.json(await evalJson(ARR_APPEND_LUA, key, [String(value)]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Grading (server-authoritative) ──────────────────────────────────────────
+// The answer never reaches the browser; correctness, the speed clock, scoring,
+// the daily first-correct, streaks, leaderboards, groups and history are all
+// computed and written here so none of it can be forged client-side.
+
+const GRACE_PERIOD = 15, DECAY_RATE = 0.01, SCORE_FLOOR = 0.25;
+const calcMultiplier = (s) => Math.max(SCORE_FLOOR, 1 - Math.max(0, s - GRACE_PERIOD) * DECAY_RATE);
+const normalize = (s) => String(s || "").toLowerCase().replace(/-/g, " ").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+const checkAnswer = (u, c, aliases = []) => {
+  const un = normalize(u);
+  if (!un) return false;
+  const targets = [c, ...(aliases || [])].map(normalize);
+  return targets.some((cn) => {
+    if (!cn) return false;
+    if (un === cn || un.indexOf(cn) >= 0 || cn.indexOf(un) >= 0) return true;
+    const words = cn.split(" ").filter((w) => w.length > 3);
+    return words.length > 0 && words.filter((w) => un.indexOf(w) >= 0).length >= Math.ceil(words.length * 0.7);
+  });
+};
+const EXCLUDED_USERS = ["tommyf10"];
+const isExcludedUser = (u) => EXCLUDED_USERS.indexOf(String(u || "").toLowerCase()) >= 0;
+
+// Atomically record a submission (one per user per day) and report how many real
+// players were already correct before it — used for the daily first-correct medal.
+const SUBMIT_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local obj = {}
+if cur and #cur > 0 then obj = cjson.decode(cur) end
+local user = ARGV[1]
+if obj[user] ~= nil then
+  return cjson.encode({ dup = true, existing = obj[user] })
+end
+local exc = {}
+local el = cjson.decode(ARGV[3])
+for i = 1, #el do exc[el[i]] = true end
+local count = 0
+for k, v in pairs(obj) do
+  if type(v) == 'table' and v.isCorrect and not exc[string.lower(k)] then count = count + 1 end
+end
+obj[user] = cjson.decode(ARGV[2])
+redis.call('SET', KEYS[1], cjson.encode(obj))
+return cjson.encode({ created = true, priorCorrect = count })
+`;
+
+// Start the answer clock — first reveal wins (SET NX), cannot be reset by refresh.
+app.post("/api/start", async (req, res) => {
+  try {
+    const { username } = req.body;
+    if (!username) return res.status(400).json({ error: "username required" });
+    const key = `start:${getESTDate()}:${username}`;
+    await redis(["SET", key, String(Date.now()), "NX"]);
+    const stored = await dbGet(key);
+    res.json({ ok: true, startedAt: stored ? parseInt(stored, 10) : Date.now() });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Grade a submission entirely on the server.
+app.post("/api/grade", async (req, res) => {
+  try {
+    const { username, guess } = req.body;
+    if (!username) return res.status(400).json({ error: "username required" });
+    const date = getESTDate(), month = getESTMonthKey();
+
+    const qRaw = await dbGet(`question:${date}`);
+    if (!qRaw) return res.json({ ok: false, error: "no_question" });
+    const q = JSON.parse(qRaw);
+    if (!q || q.id === "q1" || !q.points) return res.json({ ok: false, error: "not_gradable" });
+    const reveal = q.displayAnswer || q.answer;
+
+    // Server-authoritative timing
+    const startRaw = await dbGet(`start:${date}:${username}`);
+    const startMs = startRaw ? parseInt(startRaw, 10) : Date.now();
+    const responseTime = Math.max(0, Math.round((Date.now() - startMs) / 1000));
+    const speedMult = calcMultiplier(responseTime);
+
+    const correct = checkAnswer(guess || "", q.answer, q.aliases || []);
+    const excluded = isExcludedUser(username);
+    const base = q.points;
+    const pts = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
+
+    const sub = {
+      answer: String(guess || ""), isCorrect: correct, points: pts, basePoints: base,
+      speedMult: Math.round(speedMult * 100), time: new Date().toISOString(), responseTime,
+    };
+
+    // Atomic insert (one submission per user per day) + prior-correct count
+    const ins = await evalJson(SUBMIT_LUA, `submissions:${date}`, [String(username), JSON.stringify(sub), JSON.stringify(EXCLUDED_USERS)]);
+    if (ins && ins.dup) return res.json({ ok: true, already: true, result: ins.existing || {}, displayAnswer: reveal });
+    const isFirstCorrect = correct && !excluded && ins.priorCorrect === 0;
+
+    // Profile / streak (server-owned)
+    const usersRaw = await dbGet("users");
+    const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
+    const rec = usersObj[username] || {};
+    const streak = correct ? ((rec.streak || 0) + 1) : 0;
+    await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ streak }), "merge"]);
+
+    // Global leaderboard (hosts tracked but scored 0)
+    const lbRaw = await dbGet(`leaderboard:${month}`);
+    const lb = lbRaw ? JSON.parse(lbRaw) : [];
+    const exLb = lb.find((e) => e.username === username);
+    const entry = exLb
+      ? { ...exLb, points: excluded ? 0 : (exLb.points + pts), correct: (exLb.correct || 0) + (correct ? 1 : 0), streak, answered: (exLb.answered || 0) + 1 }
+      : { username, displayName: rec.displayName || "", state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
+    await evalJson(ARR_UPSERT_LUA, `leaderboard:${month}`, [String(username), JSON.stringify(entry)]);
+
+    // Archive first-correct (informational)
+    if (isFirstCorrect) {
+      try { const arcRaw = await dbGet(`archive:${date}`); if (arcRaw) { const a = JSON.parse(arcRaw); a.goldWinner = username; await dbSet(`archive:${date}`, JSON.stringify(a)); } } catch (e) {}
+    }
+
+    // Group leaderboards — membership read from the authoritative user record
+    const groups = Array.isArray(rec.groups) ? rec.groups : [];
+    for (const code of groups) {
+      try {
+        if (correct && !excluded) await evalJson(ARR_APPEND_LUA, `groupsub:${code}:${date}`, [String(username)]);
+        const gRaw = await dbGet(`grouplb:${code}:${month}`);
+        const glb = gRaw ? JSON.parse(gRaw) : [];
+        const gex = glb.find((e) => e.username === username);
+        const gentry = gex
+          ? { ...gex, points: excluded ? 0 : (gex.points + pts), correct: (gex.correct || 0) + (correct ? 1 : 0), streak, answered: (gex.answered || 0) + 1 }
+          : { username, state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
+        await evalJson(ARR_UPSERT_LUA, `grouplb:${code}:${month}`, [String(username), JSON.stringify(gentry)]);
+      } catch (e) {}
+    }
+
+    // History (server-owned personal stats)
+    let prev = null;
+    try { const hRaw = await dbGet(`history:${username}`); prev = hRaw ? JSON.parse(hRaw) : null; } catch (e) {}
+    prev = prev || { totalAnswered: 0, totalCorrect: 0, totalPoints: 0, firstCorrects: 0, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, bestStreak: 0, responseTimes: [], categoryStats: {}, dailyLog: [] };
+    const cat = q.category || "Wildcard";
+    const cs = (prev.categoryStats && prev.categoryStats[cat]) || { answered: 0, correct: 0 };
+    const history = {
+      ...prev,
+      totalAnswered: prev.totalAnswered + 1,
+      totalCorrect: prev.totalCorrect + (correct ? 1 : 0),
+      totalPoints: prev.totalPoints + pts,
+      bestStreak: Math.max(prev.bestStreak || 0, streak),
+      firstCorrects: (prev.firstCorrects != null ? prev.firstCorrects : (prev.goldCorrects || 0)) + (isFirstCorrect ? 1 : 0),
+      responseTimes: [...(prev.responseTimes || []), responseTime].slice(-90),
+      categoryStats: { ...(prev.categoryStats || {}), [cat]: { answered: cs.answered + 1, correct: cs.correct + (correct ? 1 : 0) } },
+      dailyLog: [...((prev.dailyLog || []).slice(-89)), { date, correct, points: pts, responseTime, category: cat }],
+    };
+    await dbSet(`history:${username}`, JSON.stringify(history));
+
+    res.json({ ok: true, result: sub, displayAnswer: reveal, isFirstCorrect, streak, history });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
