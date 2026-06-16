@@ -68,46 +68,71 @@ const mergeWrite = async (key, mutate, fallback) => {
   return next;
 };
 
+// Race-free write via the server's atomic Redis routes. Throws on any failure so
+// callers fall back to the mergeWrite path above — the app keeps working either way.
+const atomicPost = async (path, body) => {
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  if (!res.ok) throw new Error(`${path} ${res.status}`);
+  return res.json();
+};
+
 // Merge a partial update into one user's record (streak, profile fields, groups, joined).
-const mergeUser = (username, partial) =>
-  mergeWrite("users", (o) => ({ ...(o || {}), [username]: { ...((o || {})[username] || {}), ...partial } }), {});
+const mergeUser = async (username, partial) => {
+  try { await atomicPost("/api/merge", { key: "users", field: username, value: partial, mode: "merge" }); }
+  catch (e) { await mergeWrite("users", (o) => ({ ...(o || {}), [username]: { ...((o || {})[username] || {}), ...partial } }), {}); }
+};
 
 // Atomically claim a brand-new username at registration. Returns {ok:false} if taken.
 const registerUserUnique = async (username, full) => {
-  let taken = false;
-  await mergeWrite("users", (o) => {
-    const base = o || {};
-    if (base[username]) { taken = true; return base; }
-    return { ...base, [username]: full };
-  }, {});
-  return { ok: !taken };
+  try {
+    const r = await atomicPost("/api/merge", { key: "users", field: username, value: full, mode: "setnx" });
+    return { ok: !(r && r.taken) };
+  } catch (e) {
+    let taken = false;
+    await mergeWrite("users", (o) => {
+      const base = o || {};
+      if (base[username]) { taken = true; return base; }
+      return { ...base, [username]: full };
+    }, {});
+    return { ok: !taken };
+  }
 };
 
 // Insert/replace one entry (matched by username) in an array-blob, then sort by points desc.
-const upsertEntry = (key, entry) =>
-  mergeWrite(key, (arr) => {
-    const base = Array.isArray(arr) ? arr : [];
-    const filtered = base.filter((e) => e.username !== entry.username);
-    filtered.push(entry);
-    filtered.sort((a, b) => b.points - a.points);
-    return filtered;
-  }, []);
+const upsertEntry = async (key, entry) => {
+  try { await atomicPost("/api/upsert", { key, username: entry.username, entry }); }
+  catch (e) {
+    await mergeWrite(key, (arr) => {
+      const base = Array.isArray(arr) ? arr : [];
+      const filtered = base.filter((e) => e.username !== entry.username);
+      filtered.push(entry);
+      filtered.sort((a, b) => b.points - a.points);
+      return filtered;
+    }, []);
+  }
+};
 
 // Patch fields on one existing array entry (matched by username); no-op if absent.
 const patchEntry = (key, username, partial) =>
   mergeWrite(key, (arr) => (Array.isArray(arr) ? arr.map((e) => (e.username === username ? { ...e, ...partial } : e)) : []), []);
 
 // Set one field inside an object-blob (e.g. submissions[username] = sub).
-const setObjField = (key, field, value) =>
-  mergeWrite(key, (o) => ({ ...(o || {}), [field]: value }), {});
+const setObjField = async (key, field, value) => {
+  try { await atomicPost("/api/merge", { key, field, value, mode: "set" }); }
+  catch (e) { await mergeWrite(key, (o) => ({ ...(o || {}), [field]: value }), {}); }
+};
 
 // Delete one field from an object-blob (e.g. remove a user's submission).
-const deleteObjField = (key, field) =>
-  mergeWrite(key, (o) => { const n = { ...(o || {}) }; delete n[field]; return n; }, {});
+const deleteObjField = async (key, field) => {
+  try { await atomicPost("/api/merge", { key, field, mode: "del" }); }
+  catch (e) { await mergeWrite(key, (o) => { const n = { ...(o || {}) }; delete n[field]; return n; }, {}); }
+};
 
 // Append a value to an array-blob if not already present (e.g. groupsub members).
-const appendUnique = (key, value) =>
-  mergeWrite(key, (arr) => { const a = Array.isArray(arr) ? arr : []; return a.includes(value) ? a : [...a, value]; }, []);
+const appendUnique = async (key, value) => {
+  try { await atomicPost("/api/append", { key, value }); }
+  catch (e) { await mergeWrite(key, (arr) => { const a = Array.isArray(arr) ? arr : []; return a.includes(value) ? a : [...a, value]; }, []); }
+};
 
 // Add/remove a member inside a group object's nested members array (preserves concurrent changes).
 const mutateGroupMembers = (key, fn) =>
