@@ -237,6 +237,95 @@ app.get("/api/storage", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ─── Atomic write routes (Redis EVAL) ─────────────────────────────────────────
+// Redis runs each Lua script atomically, so a field/entry update touches only its
+// own slot — two near-simultaneous writers (two signups, the 6am answer rush) can
+// no longer overwrite each other the way a client read-modify-write of a shared
+// JSON blob does. The client falls back to its old path if any of these fail.
+
+const OBJ_MERGE_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local obj = {}
+if cur and #cur > 0 then obj = cjson.decode(cur) end
+local field, mode = ARGV[1], ARGV[3]
+if mode == 'setnx' then
+  if obj[field] ~= nil then return cjson.encode({ ok = false, taken = true }) end
+  obj[field] = cjson.decode(ARGV[2])
+elseif mode == 'merge' then
+  local f = obj[field]
+  if type(f) ~= 'table' then f = {} end
+  local patch = cjson.decode(ARGV[2])
+  for k, v in pairs(patch) do f[k] = v end
+  obj[field] = f
+elseif mode == 'del' then
+  obj[field] = nil
+else
+  obj[field] = cjson.decode(ARGV[2])
+end
+local has = false
+for _ in pairs(obj) do has = true break end
+redis.call('SET', KEYS[1], has and cjson.encode(obj) or '{}')
+return cjson.encode({ ok = true })
+`;
+
+const ARR_UPSERT_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local arr = {}
+if cur and #cur > 0 then arr = cjson.decode(cur) end
+local entry = cjson.decode(ARGV[2])
+local out = {}
+for i = 1, #arr do
+  if arr[i].username ~= ARGV[1] then out[#out + 1] = arr[i] end
+end
+out[#out + 1] = entry
+table.sort(out, function(a, b) return (a.points or 0) > (b.points or 0) end)
+redis.call('SET', KEYS[1], cjson.encode(out))
+return cjson.encode({ ok = true })
+`;
+
+const ARR_APPEND_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local arr = {}
+if cur and #cur > 0 then arr = cjson.decode(cur) end
+for i = 1, #arr do if arr[i] == ARGV[1] then return cjson.encode({ ok = true }) end end
+arr[#arr + 1] = ARGV[1]
+redis.call('SET', KEYS[1], cjson.encode(arr))
+return cjson.encode({ ok = true })
+`;
+
+const evalJson = async (script, key, args) => {
+  const result = await redis(["EVAL", script, "1", key, ...args]);
+  try { return JSON.parse(result); } catch (e) { return { ok: true }; }
+};
+
+// Merge one field into an object-blob: modes set | setnx | merge | del
+app.post("/api/merge", async (req, res) => {
+  try {
+    const { key, field, value, mode } = req.body;
+    if (!key || field == null) return res.status(400).json({ error: "key and field required" });
+    const valJson = mode === "del" ? "null" : JSON.stringify(value == null ? null : value);
+    res.json(await evalJson(OBJ_MERGE_LUA, key, [String(field), valJson, mode || "set"]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Insert/replace one entry (matched by username) in an array-blob, sorted by points desc
+app.post("/api/upsert", async (req, res) => {
+  try {
+    const { key, username, entry } = req.body;
+    if (!key || !username || !entry) return res.status(400).json({ error: "key, username, entry required" });
+    res.json(await evalJson(ARR_UPSERT_LUA, key, [String(username), JSON.stringify(entry)]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Append a value to an array-blob if not already present
+app.post("/api/append", async (req, res) => {
+  try {
+    const { key, value } = req.body;
+    if (!key || value == null) return res.status(400).json({ error: "key and value required" });
+    res.json(await evalJson(ARR_APPEND_LUA, key, [String(value)]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });
