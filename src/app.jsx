@@ -276,16 +276,21 @@ export default function App() {
   const [adminUnlocked, setAdminUnlocked] = useState(false);
   const [menuOpen, setMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
+  const [joinedNotice, setJoinedNotice] = useState(null);
   const isMobile = useIsMobile();
 
   useEffect(() => { loadAll(); }, []);
 
   const loadAll = async () => {
     setLoading(true);
-    // Capture a referral code from the URL (?ref=) so it survives until the user signs up
+    // Capture referral (?ref=) and group-invite (?join=) codes from the URL so they
+    // survive until the user signs in / signs up.
     try {
-      const refParam = new URLSearchParams(window.location.search).get("ref");
+      const params = new URLSearchParams(window.location.search);
+      const refParam = params.get("ref");
       if (refParam) localStorage.setItem("whatis_ref", refParam);
+      const joinParam = params.get("join");
+      if (joinParam) localStorage.setItem("whatis_join", joinParam);
     } catch (e) {}
     // Clean up stale submission entries from previous days
     const today = todayKey();
@@ -344,6 +349,44 @@ export default function App() {
     setLeaderboard(prev => prev.map(e => e.username === username ? { ...e, ...partial } : e));
     await patchEntry(`leaderboard:${monthKey()}`, username, partial);
   };
+
+  // Add a user to a group by invite code. Used by the ?join= auto-join below.
+  const joinGroupByCode = async (username, rawCode) => {
+    const code = String(rawCode || "").toUpperCase().trim();
+    if (!username || !code) return { ok: false };
+    try {
+      const r = await apiStorage.get(`group:${code}`).catch(() => null);
+      if (!r) return { ok: false, error: "not_found" };
+      const g = JSON.parse(r.value);
+      await mutateGroupMembers(`group:${code}`, (m) => (m.includes(username) ? m : [...m, username]));
+      const cur = users[username] || user || {};
+      const updatedGroups = Array.isArray(cur.groups)
+        ? (cur.groups.includes(code) ? cur.groups : [...cur.groups, code])
+        : [code];
+      await saveUser(username, { groups: updatedGroups });
+      setUser(prev => {
+        if (!prev || prev.username !== username) return prev;
+        const nu = { ...prev, groups: updatedGroups };
+        try { localStorage.setItem("whatis_user", JSON.stringify(nu)); } catch (e) {}
+        return nu;
+      });
+      return { ok: true, name: g.name, code };
+    } catch (e) { return { ok: false }; }
+  };
+
+  // Auto-join a pending group invite (?join=CODE) once a user is signed in — works for
+  // an existing user opening the link AND for a brand-new account created from it.
+  useEffect(() => {
+    if (!user) return;
+    let pending = null;
+    try { pending = localStorage.getItem("whatis_join"); } catch (e) {}
+    if (!pending) return;
+    (async () => {
+      const res = await joinGroupByCode(user.username, pending);
+      try { localStorage.removeItem("whatis_join"); } catch (e) {}
+      if (res && res.ok) setJoinedNotice(res.name || "your group");
+    })();
+  }, [user?.username]);
 
   const goTab = (id) => { setTab(id); setMenuOpen(false); setMoreOpen(false); };
 
@@ -467,6 +510,12 @@ export default function App() {
       )}
 
       <div style={s.main}>
+        {joinedNotice && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "rgba(76,175,125,0.1)", border: "1px solid rgba(76,175,125,0.35)", borderRadius: 8, padding: "11px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: "0.85rem", color: "#4CAF7D" }}>✓ You've joined <strong style={{ color: OFF_WHITE }}>{joinedNotice}</strong>! Find it under Groups.</span>
+            <button onClick={() => setJoinedNotice(null)} style={{ background: "transparent", border: "none", color: TEXT_MUTED, fontSize: "1rem", cursor: "pointer", lineHeight: 1 }}>✕</button>
+          </div>
+        )}
         {(() => {
           // Logged-out visitors may view only the Global Leaderboard; everything
           // else falls back to the sign-in / create-account screen.
@@ -1612,10 +1661,21 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
               {inviteOpen && (
                 <>
                   <div onClick={() => setInviteOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
-                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 301, width: 230, background: SURFACE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)" }}>
-                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Invite code — share to add members</div>
-                    <div style={{ ...s.mono, fontSize: "1.4rem", fontWeight: 700, color: GOLD, letterSpacing: "0.18em", textAlign: "center", marginBottom: 11 }}>{g.code}</div>
-                    <button onClick={() => { try { navigator.clipboard.writeText(g.code); } catch (e) {} setInviteCopied(true); }} style={{ ...s.btn, width: "100%", fontSize: "0.78rem", padding: "8px" }}>{inviteCopied ? "✓ Copied!" : "Copy code"}</button>
+                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 301, width: 250, background: SURFACE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)" }}>
+                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Invite to group — share the link</div>
+                    <div style={{ ...s.mono, fontSize: "0.7rem", color: GOLD, letterSpacing: "0.16em", textAlign: "center", marginBottom: 11 }}>Code: {g.code}</div>
+                    {(() => {
+                      const joinLink = `${window.location.origin}/?join=${g.code}`;
+                      const joinMsg = `Join our group on WhatIs... Daily Trivia -\n\nOne Question.\nEvery Morning.\nMonthly Prizes.\n\n${joinLink}`;
+                      const ib = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "9px 6px", borderRadius: 7, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.74rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
+                      return (
+                        <div style={{ display: "flex", gap: 6 }}>
+                          <a href={`sms:?&body=${encodeURIComponent(joinMsg)}`} style={ib}>Text</a>
+                          <a href={`mailto:?subject=${encodeURIComponent("Join my WhatIs... Daily Trivia group")}&body=${encodeURIComponent(joinMsg)}`} style={ib}>Email</a>
+                          <button onClick={() => { try { navigator.clipboard.writeText(joinLink); } catch (e) {} setInviteCopied(true); setTimeout(() => setInviteCopied(false), 2000); }} style={{ ...ib, ...(inviteCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{inviteCopied ? "Copied!" : "Copy"}</button>
+                        </div>
+                      );
+                    })()}
                   </div>
                 </>
               )}
