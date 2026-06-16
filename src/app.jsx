@@ -821,7 +821,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
 
             <hr style={s.divider} />
       <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 4 }}>Top 5 this month</div>
-      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginBottom: 12 }}>🔄 Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
+      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginBottom: 12 }}>Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
       {(() => {
         const { real } = orderBoard(leaderboard);
         if (real.length === 0)
@@ -992,7 +992,7 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
         <div>
           <div style={{ ...s.mono, fontSize: "1rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
           <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700 }}>$100 Visa Gift Card</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginTop: 3 }}>Top scorer wins at month end · 🔄 Leaderboard resets on the 1st of each month</div>
+          <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginTop: 3 }}>Top scorer wins at month end · Leaderboard resets on the 1st of each month</div>
         </div>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontFamily: SERIF, fontSize: "2rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{daysLeft()}</div>
