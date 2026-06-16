@@ -538,12 +538,11 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     const base         = (question && question.id !== "q1" && question.points) ? question.points : 0;
     const pts          = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
     const excluded     = isExcludedUser(user.username);
-    // Excluded users (question writers) don't occupy a medal slot, so real
-    // players' first/second/third ordering ignores them entirely.
+    // First correct answer of the day (real players only) — informational only, no scoring effect
     const globalCorrectCount = Object.entries(submissions).filter(([u, sb]) => sb.isCorrect && !isExcludedUser(u)).length;
-    const globalMedal  = (correct && !excluded) ? getMedal(globalCorrectCount) : null; // cosmetic only
+    const isFirstCorrect = correct && !excluded && globalCorrectCount === 0;
     const sub = { answer, isCorrect: correct, points: pts, basePoints: base,
-      speedMult: Math.round(speedMult * 100), medal: globalMedal,
+      speedMult: Math.round(speedMult * 100),
       time: new Date().toISOString(), responseTime };
     const newSubs = { ...submissions, [user.username]: sub };
     setSubmissions(newSubs);
@@ -555,40 +554,33 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     await saveUser(user.username, { streak });
     const ex = leaderboard.find(e => e.username === user.username);
-    const medalUpdate = globalMedal ? { [`${globalMedal}Corrects`]: ((ex?.[`${globalMedal}Corrects`] || 0) + 1) } : {};
     const entry = ex
-      ? { ...ex, points: excluded ? 0 : ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1, ...medalUpdate }
-      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...medalUpdate };
+      ? { ...ex, points: excluded ? 0 : ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1 }
+      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
     await saveLBEntry(entry);
 
-    // Update archive with gold winner
-    if (globalMedal === "gold" && correct) {
+    // Update archive with the first correct answerer (informational only)
+    if (isFirstCorrect) {
       try {
         const arcR = await apiStorage.get(`archive:${todayKey()}`).catch(() => null);
         if (arcR) {
-          const entry = JSON.parse(arcR.value);
-          await apiStorage.set(`archive:${todayKey()}`, JSON.stringify({ ...entry, goldWinner: user.username }));
+          const aentry = JSON.parse(arcR.value);
+          await apiStorage.set(`archive:${todayKey()}`, JSON.stringify({ ...aentry, goldWinner: user.username }));
         }
       } catch (e) {}
     }
 
-    // Group leaderboards — host still shows at the bottom with 0 points
+    // Group leaderboards — strictly time-based, identical scoring to the global board
     const userGroups = user.groups || [];
     for (const code of userGroups) {
       try {
-        const gsubR = await apiStorage.get(`groupsub:${code}:${todayKey()}`).catch(() => null);
-        const gsub = gsubR ? JSON.parse(gsubR.value) : [];
-        const groupMedal = (correct && !excluded) ? getMedal(gsub.length) : null;
-        const groupBonus = correct && groupMedal ? Math.round(base * MEDAL[groupMedal].multiplier) : 0;
-        const groupPts = excluded ? 0 : (correct ? base + groupBonus : 0);
         if (correct && !excluded) await appendUnique(`groupsub:${code}:${todayKey()}`, user.username);
         const gR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
         let glb = gR ? JSON.parse(gR.value) : [];
         const gex = glb.find(e => e.username === user.username);
-        const gMedalUpdate = groupMedal ? { [`${groupMedal}Corrects`]: ((gex?.[`${groupMedal}Corrects`] || 0) + 1) } : {};
         const gentry = gex
-          ? { ...gex, points: excluded ? 0 : gex.points + groupPts, correct: gex.correct + (correct ? 1 : 0), streak, answered: gex.answered + 1, ...gMedalUpdate }
-          : { username: user.username, state: user.state || "", points: groupPts, correct: correct ? 1 : 0, streak, answered: 1, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, ...gMedalUpdate };
+          ? { ...gex, points: excluded ? 0 : gex.points + pts, correct: gex.correct + (correct ? 1 : 0), streak, answered: gex.answered + 1 }
+          : { username: user.username, state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
         await upsertEntry(`grouplb:${code}:${monthKey()}`, gentry);
       } catch (e) {}
     }
@@ -603,9 +595,6 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       totalAnswered: prev.totalAnswered + 1,
       totalCorrect: prev.totalCorrect + (correct ? 1 : 0),
       totalPoints: prev.totalPoints + pts,
-      goldCorrects: (prev.goldCorrects || 0) + (globalMedal === "gold" ? 1 : 0),
-      silverCorrects: (prev.silverCorrects || 0) + (globalMedal === "silver" ? 1 : 0),
-      bronzeCorrects: (prev.bronzeCorrects || 0) + (globalMedal === "bronze" ? 1 : 0),
       bestStreak: Math.max(prev.bestStreak || 0, streak),
       responseTimes: allTimes,
       categoryStats: { ...prev.categoryStats, [cat]: { answered: catStats.answered + 1, correct: catStats.correct + (correct ? 1 : 0) } },
@@ -1105,6 +1094,68 @@ function ArchiveTab() {
   );
 }
 
+function GroupPastWinners({ code }) {
+  const [months, setMonths] = useState(null); // [{month, winner, points}] newest first; null = loading
+  const [sel, setSel] = useState("");
+
+  useEffect(() => {
+    let alive = true;
+    (async () => {
+      try {
+        const res = await apiStorage.list(`grouplb:${code}:`);
+        const cur = monthKey();
+        const mkeys = ((res && res.keys) || [])
+          .map(k => k.split(":")[2])
+          .filter(m => /^\d{4}-\d{2}$/.test(m) && m < cur)
+          .sort((a, b) => b.localeCompare(a));
+        const out = [];
+        for (const m of mkeys) {
+          try {
+            const r = await apiStorage.get(`grouplb:${code}:${m}`);
+            const arr = JSON.parse(r.value) || [];
+            const real = arr.filter(e => !isExcludedUser(e.username)).sort((a, b) => b.points - a.points);
+            const w = real[0];
+            out.push({ month: m, winner: w ? (w.displayName || w.username) : null, points: w ? w.points : 0 });
+          } catch (e) {}
+        }
+        if (!alive) return;
+        setMonths(out);
+        if (out.length) setSel(out[0].month);
+      } catch (e) { if (alive) setMonths([]); }
+    })();
+    return () => { alive = false; };
+  }, [code]);
+
+  if (months === null) return null;
+  const fmtMonth = (m) => { const [y, mo] = m.split("-").map(Number); return new Date(y, mo - 1, 1).toLocaleString("default", { month: "long", year: "numeric" }); };
+
+  if (months.length === 0) return (
+    <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 16px", marginBottom: 20 }}>
+      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>🏆 Past winners</div>
+      <div style={{ fontSize: "0.8rem", color: TEXT_MUTED }}>No completed months yet — the first champion is crowned when this month ends.</div>
+    </div>
+  );
+
+  const selected = months.find(m => m.month === sel) || months[0];
+  return (
+    <div style={{ background: "rgba(201,168,76,0.06)", border: "1px solid rgba(201,168,76,0.2)", borderRadius: 8, padding: "12px 16px", marginBottom: 20 }}>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, flexWrap: "wrap" }}>
+        <div style={{ ...s.mono, fontSize: "0.6rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.08em" }}>🏆 Past winners</div>
+        <select value={sel} onChange={e => setSel(e.target.value)} style={{ ...s.input, width: "auto", padding: "6px 10px", fontSize: "0.8rem" }}>
+          {months.map(m => <option key={m.month} value={m.month}>{fmtMonth(m.month)}</option>)}
+        </select>
+      </div>
+      <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 11 }}>
+        <div style={{ display: "flex", alignItems: "center", gap: 9 }}>
+          <span style={{ fontSize: "1.3rem" }}>🥇</span>
+          <div style={{ fontFamily: SERIF, fontSize: "1.1rem", fontWeight: 700, color: OFF_WHITE }}>{selected.winner || "No winner recorded"}</div>
+        </div>
+        {selected.winner && <div style={{ ...s.mono, fontSize: "0.85rem", color: GOLD, fontWeight: 600 }}>{selected.points} pts</div>}
+      </div>
+    </div>
+  );
+}
+
 function GroupsTab({ user, setUser, saveUser, users, submissions }) {
   // view: "home" | "create" | "join" | "group"
   const [view, setView] = useState("home");
@@ -1270,6 +1321,9 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
           <div style={{ fontSize: "0.8rem", color: TEXT_SEC }}>Invite code — share to add members</div>
           <div style={{ ...s.mono, fontSize: "1rem", fontWeight: 700, color: GOLD, letterSpacing: "0.15em" }}>{g.code}</div>
         </div>
+
+        {/* Past monthly winners */}
+        <GroupPastWinners code={g.code} />
 
         {/* Leaderboard */}
         {(() => {
@@ -1670,9 +1724,6 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
             <StatRow l="Total Points" v={(history.totalPoints || 0).toLocaleString()} gold />
             <StatRow l="Best Streak" v={`🔥 ${history.bestStreak || 0}`} />
             <StatRow l="Avg Speed" v={avgTime ? `${avgTime}s` : "—"} />
-            <StatRow l="🥇 First Correct" v={history.goldCorrects || 0} />
-            <StatRow l="🥈 Second Correct" v={history.silverCorrects || 0} />
-            <StatRow l="🥉 Third Correct" v={history.bronzeCorrects || 0} />
           </div>
 
           {/* Category Breakdown */}
@@ -2791,9 +2842,6 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                             { v: h.totalPoints?.toLocaleString() || 0, l: "Total Points", gold: true },
                             { v: h.bestStreak || 0, l: "Best Streak" },
                             { v: avgTime ? `${avgTime}s` : "—", l: "Avg Time" },
-                            { v: h.goldCorrects || 0, l: "🥇 First Correct" },
-                            { v: h.silverCorrects || 0, l: "🥈 Second Correct" },
-                            { v: h.bronzeCorrects || 0, l: "🥉 Third Correct" },
                           ].map((x,i) => (
                             <div key={i} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "8px 13px", borderTop: i === 0 ? "none" : `1px solid ${SURFACE3}` }}>
                               <span style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, textTransform: "uppercase", letterSpacing: "0.06em" }}>{x.l}</span>
