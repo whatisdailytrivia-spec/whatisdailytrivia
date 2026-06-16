@@ -508,8 +508,10 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     setError("");
     if (authMode === "register") {
       if (!form.username || !form.email || !form.password || !form.state) return setError("All fields required.");
+      const email = form.email.trim().toLowerCase();
+      if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
-      const nu = { username: form.username, email: form.email, password: form.password, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
+      const nu = { username: form.username, email, password: form.password, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
       const res = await registerUser(form.username, nu);
       if (!res.ok) return setError("Username taken.");
       setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
@@ -807,15 +809,15 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       </div>
 
             <hr style={s.divider} />
-      <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 12 }}>Top 5 this month</div>
+      <div style={{ ...s.label, fontSize: "0.65rem", marginBottom: 4 }}>Top 5 this month</div>
+      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginBottom: 12 }}>🔄 Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
       {(() => {
-        const { real, hosts } = orderBoard(leaderboard);
-        if (real.length === 0 && hosts.length === 0)
+        const { real } = orderBoard(leaderboard);
+        if (real.length === 0)
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
           <LBHeader />
           {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
-          {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
     </div>
@@ -979,7 +981,7 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
         <div>
           <div style={{ ...s.mono, fontSize: "1rem", color: GOLD, letterSpacing: "0.1em", textTransform: "uppercase", marginBottom: 4 }}>🏆 Monthly Prize</div>
           <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700 }}>$100 Visa Gift Card</div>
-          <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginTop: 3 }}>Top scorer wins at month end</div>
+          <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginTop: 3 }}>Top scorer wins at month end · 🔄 Leaderboard resets on the 1st of each month</div>
         </div>
         <div style={{ textAlign: "center" }}>
           <div style={{ fontFamily: SERIF, fontSize: "2rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{daysLeft()}</div>
