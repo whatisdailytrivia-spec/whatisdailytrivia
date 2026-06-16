@@ -466,7 +466,7 @@ export default function App() {
           // else falls back to the sign-in / create-account screen.
           const shownTab = (!user && tab !== "leaderboard") ? "play" : tab;
           return <>
-        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
+        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} saveLBEntry={saveLBEntry} />}
         {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
         {shownTab === "winners"     && <WinnersTab />}
         {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
@@ -482,7 +482,7 @@ export default function App() {
   );
 }
 
-function PlayTab({ user, setUser, users, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, saveLBEntry }) {
+function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ username: "", email: "", password: "", state: "" });
   const [answer, setAnswer] = useState("");
@@ -555,14 +555,30 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       const email = form.email.trim().toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
-      const nu = { username: form.username, email, password: form.password, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
-      const res = await registerUser(form.username, nu);
+      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
+      let res;
+      try {
+        res = await atomicPost("/api/register", { username: form.username, password: form.password, profile });
+      } catch (e) {
+        // Legacy fallback (endpoint not deployed yet): store the old-style record
+        const legacy = await registerUser(form.username, { ...profile, password: form.password });
+        res = legacy.ok ? { ok: true, user: { ...profile, password: form.password } } : { ok: false, taken: true };
+      }
       if (!res.ok) return setError("Username taken.");
-      setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
+      const u = res.user || profile;
+      setUser(u); localStorage.setItem("whatis_user", JSON.stringify(u));
+      setUsers(prev => ({ ...prev, [form.username]: u }));
     } else {
-      const f = users[form.username];
-      if (!f || f.password !== form.password) return setError("Invalid username or password.");
-      // Self-heal: legacy accounts created before the joined field existed
+      let res;
+      try {
+        res = await atomicPost("/api/login", { username: form.username, password: form.password });
+      } catch (e) {
+        // Legacy fallback: client-side compare if the endpoint isn't available
+        const f = users[form.username];
+        res = (f && f.password != null && f.password === form.password) ? { ok: true, user: f } : { ok: false };
+      }
+      if (!res.ok) return setError("Invalid username or password.");
+      const f = res.user;
       const healed = f.joined ? f : { ...f, joined: todayKey() };
       if (!f.joined) await saveUser(form.username, { joined: healed.joined });
       setUser(healed); localStorage.setItem("whatis_user", JSON.stringify(healed));
@@ -1725,6 +1741,7 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
   const [newAvatar, setNewAvatar] = useState("");
   const [showPassword, setShowPassword] = useState(false);
   const [editingPassword, setEditingPassword] = useState(false);
+  const [currentPassword, setCurrentPassword] = useState("");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwError, setPwError] = useState("");
@@ -1752,11 +1769,19 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
 
   const changePassword = async () => {
     setPwError("");
+    if (!currentPassword) return setPwError("Enter your current password.");
     if (!newPassword) return setPwError("Enter a new password.");
     if (newPassword.length < 4) return setPwError("Password must be at least 4 characters.");
     if (newPassword !== confirmPassword) return setPwError("Passwords don't match.");
-    await saveField("password", newPassword, () => {});
-    setEditingPassword(false); setNewPassword(""); setConfirmPassword(""); setShowPassword(false);
+    let res;
+    try {
+      res = await atomicPost("/api/change-password", { username: user.username, currentPassword, newPassword });
+    } catch (e) {
+      await saveField("password", newPassword, () => {}); // legacy fallback
+      res = { ok: true };
+    }
+    if (!res.ok) return setPwError(res.error === "wrong current password" ? "Current password is incorrect." : "Could not update password.");
+    setEditingPassword(false); setNewPassword(""); setConfirmPassword(""); setCurrentPassword(""); setShowPassword(false);
     setPwSaved(true); setTimeout(() => setPwSaved(false), 2500);
   };
 
@@ -1893,19 +1918,21 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8 }}>
             <div style={{ flex: 1, minWidth: 0 }}>
               <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 3 }}>Password</div>
-              <div style={{ fontSize: "0.88rem", color: TEXT_SEC, fontFamily: showPassword ? SANS : "monospace", letterSpacing: showPassword ? "normal" : "0.15em", wordBreak: "break-all" }}>
-                {showPassword ? (user.password || "—") : "••••••••"}
+              <div style={{ fontSize: "0.88rem", color: TEXT_SEC, fontFamily: "monospace", letterSpacing: "0.15em" }}>
+                ••••••••
               </div>
             </div>
             {!editingPassword && (
               <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
-                <button onClick={() => setShowPassword(v => !v)} style={{ ...s.btnSec, padding: "4px 10px", fontSize: "0.72rem" }}>{showPassword ? "Hide" : "Show"}</button>
-                <button onClick={() => { setEditingPassword(true); setNewPassword(""); setConfirmPassword(""); setPwError(""); }} style={{ ...s.btnSec, padding: "4px 10px", fontSize: "0.72rem" }}>Change</button>
+                <button onClick={() => { setEditingPassword(true); setCurrentPassword(""); setNewPassword(""); setConfirmPassword(""); setPwError(""); }} style={{ ...s.btnSec, padding: "4px 10px", fontSize: "0.72rem" }}>Change</button>
               </div>
             )}
           </div>
           {editingPassword && (
             <div style={{ display: "flex", flexDirection: "column", gap: 6, marginTop: 8 }}>
+              <input style={{ ...s.input, padding: "7px 10px", fontSize: "0.82rem" }} type={showPassword ? "text" : "password"} placeholder="Current password" value={currentPassword}
+                onChange={e => { setCurrentPassword(e.target.value); setPwError(""); }}
+                onKeyDown={e => { if (e.key === "Enter") changePassword(); if (e.key === "Escape") setEditingPassword(false); }} autoFocus />
               <input style={{ ...s.input, padding: "7px 10px", fontSize: "0.82rem" }} type={showPassword ? "text" : "password"} placeholder="New password" value={newPassword}
                 onChange={e => { setNewPassword(e.target.value); setPwError(""); }}
                 onKeyDown={e => { if (e.key === "Enter") changePassword(); if (e.key === "Escape") setEditingPassword(false); }} autoFocus />
