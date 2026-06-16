@@ -2836,6 +2836,66 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               </div>
             </div>
 
+            {/* ===== USER ACCOUNT CREATION ===== */}
+            {secHead("User Account Creation", "How fast the player base is growing",
+              <button onClick={() => { setAcctRange("24h"); setAcctView(true); }} style={{ padding: "6px 12px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: `1px solid ${GOLD}`, background: "rgba(201,168,76,0.12)", color: GOLD, whiteSpace: "nowrap", flexShrink: 0 }}>👥 New accounts →</button>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
+              <Stat v={totalUsers} l="Total accounts" gold />
+              <Stat v={`+${newToday}`} l="New today" />
+              <Stat v={`+${new7}`} l="New · 7 days" sub={`${wow >= 0 ? "▲" : "▼"} ${Math.abs(wow)}% WoW`} />
+              <Stat v={`+${new30}`} l="New · 30 days" />
+            </div>
+            <div style={panel}>
+              <div style={chartTitle}>Signups / day · last 14 days</div>
+              <Bars data={signupSeries} color={GOLD} />
+            </div>
+            <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} unit="" yLabel="Accounts" last={`${totalUsers} total`} />
+
+            {/* ===== USER ENGAGEMENT ===== */}
+            {secHead("User Engagement", "How many accounts play each day vs. the total")}
+            {(() => {
+              const partToday = totalUsers ? Math.round((todaysAnswers / totalUsers) * 100) : 0;
+              return (
+                <div>
+                  <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
+                    <div>
+                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Answered today</div>
+                      <div style={{ fontFamily: SERIF, fontSize: "2rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{todaysAnswers}<span style={{ color: TEXT_MUTED, fontSize: "1.1rem" }}> / {totalUsers}</span></div>
+                      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_SEC, marginTop: 7 }}>accounts answered today</div>
+                    </div>
+                    <div style={{ textAlign: "right" }}>
+                      <div style={{ fontFamily: SERIF, fontSize: "2.6rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{partToday}%</div>
+                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 5 }}>Daily participation</div>
+                    </div>
+                  </div>
+                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.date === "2026-06-13" ? 0 : (p.totalAccounts ? Math.min(100, Math.round((p.activeUsers / p.totalAccounts) * 100)) : 0)} unit="%" yLabel="Participation" last={`${partToday}% today`} />
+                  <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
+                    {[
+                      [`${mau}`, "Active · 30d"],
+                      [`${stickiness}%`, "Stickiness", "Stickiness = daily active ÷ monthly active (DAU/MAU). Of the accounts that play in a 30-day window, the share that show up on a given day — i.e. how habitual the game is. 100% means everyone who played this month also played today. Note: with a small user base where DAU and MAU are close, this runs high and is noisy; it sharpens as monthly numbers grow."],
+                      [`${playedAny.length}/${totalUsers}`, "Ever played"],
+                      [`${dormant}`, "Never played"],
+                    ].map(([v, l, tip], i) => (
+                      <div key={i} style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 6, cursor: tip ? "pointer" : "default" }}
+                        onClick={tip ? () => setOpenTip(openTip === l ? null : l) : undefined}>
+                        <span style={{ ...s.mono, fontSize: "0.88rem", fontWeight: 600, color: OFF_WHITE }}>{v}</span>
+                        <span style={{ ...s.mono, fontSize: "0.6rem", color: openTip === l ? GOLD : TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}{tip ? " ⓘ" : ""}</span>
+                        {tip && openTip === l && (
+                          <>
+                            <div onClick={(e) => { e.stopPropagation(); setOpenTip(null); }} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
+                            <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 301, width: 280, maxWidth: "80vw", background: SURFACE2, border: `1px solid ${GOLD}`, borderRadius: 8, padding: "11px 13px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", fontFamily: SANS, fontSize: "0.72rem", lineHeight: 1.5, color: TEXT_SEC, textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
+                              {tip}
+                            </div>
+                          </>
+                        )}
+                      </div>
+                    ))}
+                  </div>
+                </div>
+              );
+            })()}
+
             {/* ===== ENGAGEMENT BY TIME OF DAY ===== */}
             {(() => {
               const need = todScope === "single" ? [todDate]
@@ -2907,66 +2967,6 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                         </div>
                       </>
                     )}
-                  </div>
-                </div>
-              );
-            })()}
-
-            {/* ===== USER ACCOUNT CREATION ===== */}
-            {secHead("User Account Creation", "How fast the player base is growing",
-              <button onClick={() => { setAcctRange("24h"); setAcctView(true); }} style={{ padding: "6px 12px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: `1px solid ${GOLD}`, background: "rgba(201,168,76,0.12)", color: GOLD, whiteSpace: "nowrap", flexShrink: 0 }}>👥 New accounts →</button>
-            )}
-            <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
-              <Stat v={totalUsers} l="Total accounts" gold />
-              <Stat v={`+${newToday}`} l="New today" />
-              <Stat v={`+${new7}`} l="New · 7 days" sub={`${wow >= 0 ? "▲" : "▼"} ${Math.abs(wow)}% WoW`} />
-              <Stat v={`+${new30}`} l="New · 30 days" />
-            </div>
-            <div style={panel}>
-              <div style={chartTitle}>Signups / day · last 14 days</div>
-              <Bars data={signupSeries} color={GOLD} />
-            </div>
-            <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} unit="" yLabel="Accounts" last={`${totalUsers} total`} />
-
-            {/* ===== USER ENGAGEMENT ===== */}
-            {secHead("User Engagement", "How many accounts play each day vs. the total")}
-            {(() => {
-              const partToday = totalUsers ? Math.round((todaysAnswers / totalUsers) * 100) : 0;
-              return (
-                <div>
-                  <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "18px 20px", display: "flex", alignItems: "center", justifyContent: "space-between", gap: 16, flexWrap: "wrap" }}>
-                    <div>
-                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Answered today</div>
-                      <div style={{ fontFamily: SERIF, fontSize: "2rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1 }}>{todaysAnswers}<span style={{ color: TEXT_MUTED, fontSize: "1.1rem" }}> / {totalUsers}</span></div>
-                      <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_SEC, marginTop: 7 }}>accounts answered today</div>
-                    </div>
-                    <div style={{ textAlign: "right" }}>
-                      <div style={{ fontFamily: SERIF, fontSize: "2.6rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>{partToday}%</div>
-                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 5 }}>Daily participation</div>
-                    </div>
-                  </div>
-                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.date === "2026-06-13" ? 0 : (p.totalAccounts ? Math.min(100, Math.round((p.activeUsers / p.totalAccounts) * 100)) : 0)} unit="%" yLabel="Participation" last={`${partToday}% today`} />
-                  <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
-                    {[
-                      [`${mau}`, "Active · 30d"],
-                      [`${stickiness}%`, "Stickiness", "Stickiness = daily active ÷ monthly active (DAU/MAU). Of the accounts that play in a 30-day window, the share that show up on a given day — i.e. how habitual the game is. 100% means everyone who played this month also played today. Note: with a small user base where DAU and MAU are close, this runs high and is noisy; it sharpens as monthly numbers grow."],
-                      [`${playedAny.length}/${totalUsers}`, "Ever played"],
-                      [`${dormant}`, "Never played"],
-                    ].map(([v, l, tip], i) => (
-                      <div key={i} style={{ position: "relative", display: "flex", alignItems: "baseline", gap: 6, cursor: tip ? "pointer" : "default" }}
-                        onClick={tip ? () => setOpenTip(openTip === l ? null : l) : undefined}>
-                        <span style={{ ...s.mono, fontSize: "0.88rem", fontWeight: 600, color: OFF_WHITE }}>{v}</span>
-                        <span style={{ ...s.mono, fontSize: "0.6rem", color: openTip === l ? GOLD : TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.05em" }}>{l}{tip ? " ⓘ" : ""}</span>
-                        {tip && openTip === l && (
-                          <>
-                            <div onClick={(e) => { e.stopPropagation(); setOpenTip(null); }} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
-                            <div style={{ position: "absolute", top: "calc(100% + 8px)", left: 0, zIndex: 301, width: 280, maxWidth: "80vw", background: SURFACE2, border: `1px solid ${GOLD}`, borderRadius: 8, padding: "11px 13px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)", fontFamily: SANS, fontSize: "0.72rem", lineHeight: 1.5, color: TEXT_SEC, textTransform: "none", letterSpacing: "normal", fontWeight: 400 }}>
-                              {tip}
-                            </div>
-                          </>
-                        )}
-                      </div>
-                    ))}
                   </div>
                 </div>
               );
