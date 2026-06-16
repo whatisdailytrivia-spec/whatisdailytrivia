@@ -71,6 +71,7 @@ cron.schedule("0 6 * * *", async () => {
   const monthKey = getESTMonthKey();
   const dayNum   = parseInt(dateStr.slice(8), 10);
   console.log(`[CRON daily] Running for ${dateStr} (day ${dayNum})`);
+  await finalizeAnalytics();
   try {
     const override = await dbGet(`qoverride:${dateStr}`);
     if (override) {
@@ -141,6 +142,68 @@ async function setCronAlert(type, message, dateStr) {
   console.error(`[CRON] ALERT (${type}): ${message}`);
 }
 
+// ─── Analytics finalizer — durable, append-only daily rollup ──────────────────
+// Mirrors the in-app builder: writes one immutable snapshot per past day to
+// analytics_series, computed from permanent keys (submissions:DATE, archive:DATE,
+// account join dates). Runs every morning so history is captured automatically.
+
+const addDaysKey = (key, n) => {
+  const [y, m, d] = key.split("-").map(Number);
+  const dt = new Date(Date.UTC(y, m - 1, d));
+  dt.setUTCDate(dt.getUTCDate() + n);
+  return `${dt.getUTCFullYear()}-${String(dt.getUTCMonth() + 1).padStart(2, "0")}-${String(dt.getUTCDate()).padStart(2, "0")}`;
+};
+
+async function finalizeAnalytics() {
+  try {
+    const today     = getESTDate();
+    const yesterday = addDaysKey(today, -1);
+
+    const seriesRaw = await dbGet("analytics_series");
+    let series = seriesRaw ? JSON.parse(seriesRaw) : [];
+    const have = new Set(series.map(p => p.date));
+
+    const usersRaw = await dbGet("users");
+    const users = usersRaw ? Object.values(JSON.parse(usersRaw)) : [];
+    const joined = users.map(u => u.joined).filter(Boolean).sort();
+
+    let startDate = await dbGet("launch_date");
+    if (!startDate && joined.length) startDate = joined[0];
+    if (!startDate) return;
+
+    let changed = false, cur = startDate, guard = 0;
+    while (cur <= yesterday && guard < 800) {
+      if (!have.has(cur)) {
+        let subs = {}, arc = {};
+        const sRaw = await dbGet(`submissions:${cur}`);
+        if (sRaw) { try { subs = JSON.parse(sRaw); } catch (e) {} }
+        const aRaw = await dbGet(`archive:${cur}`);
+        if (aRaw) { try { arc = JSON.parse(aRaw); } catch (e) {} }
+        const arr = Object.values(subs);
+        const answers = arr.length;
+        const correct = arr.filter(x => x && x.isCorrect).length;
+        series.push({
+          date: cur,
+          totalAccounts: users.filter(u => u.joined && u.joined <= cur).length,
+          newAccounts:   users.filter(u => u.joined === cur).length,
+          activeUsers: answers, answers, correct,
+          category: arc.category || null,
+          points: arc.points != null ? arc.points : null,
+        });
+        changed = true;
+      }
+      cur = addDaysKey(cur, 1); guard++;
+    }
+    if (changed) {
+      series.sort((a, b) => a.date.localeCompare(b.date));
+      await dbSet("analytics_series", JSON.stringify(series));
+      console.log(`[CRON daily] Analytics finalized through ${yesterday} (${series.length} days stored)`);
+    }
+  } catch (e) {
+    console.error("[CRON daily] Analytics finalize error:", e.message);
+  }
+}
+
 // ─── Storage API routes ───────────────────────────────────────────────────────
 
 app.get("/api/storage/:key", async (req, res) => {
@@ -182,5 +245,5 @@ const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`WhatIs... server running on port ${PORT}`);
   console.log(`DB: ${UPSTASH_URL ? "Upstash Redis connected" : "NO DB CONFIGURED"}`);
-  console.log(`Cron: daily 6am EST + monthly reset`);
+  console.log(`Cron: daily 6am EST (publish + analytics) + monthly reset`);
 });
