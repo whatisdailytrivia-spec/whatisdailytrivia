@@ -2497,15 +2497,30 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         );
         const Bars = ({ data, color }) => {
           const max = Math.max(1, ...data.map(d => d.v));
+          const PLOT = 96;
+          const yticks = [max, Math.round(max / 2), 0];
           return (
-            <div style={{ display: "flex", alignItems: "flex-end", gap: 3, marginTop: 10 }}>
-              {data.map((d, i) => (
-                <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", gap: 3 }} title={`${d.k}: ${d.v}`}>
-                  <div style={{ ...s.mono, fontSize: "0.52rem", color: d.v ? TEXT_SEC : TEXT_MUTED }}>{d.v}</div>
-                  <div style={{ width: "100%", height: `${Math.round((d.v / max) * 50)}px`, minHeight: d.v ? 3 : 1, background: d.v ? color : SURFACE3, borderRadius: 2 }} />
-                  <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED }}>{d.k.slice(8)}</div>
+            <div style={{ display: "flex", marginTop: 10 }}>
+              <div style={{ width: 30, flexShrink: 0, height: PLOT, display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 6, boxSizing: "border-box" }}>
+                {yticks.map((t, i) => <span key={i} style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, lineHeight: 1 }}>{t}</span>)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0 }}>
+                <div style={{ position: "relative", height: PLOT, borderLeft: `1px solid ${SURFACE3}`, borderBottom: `1px solid ${SURFACE3}` }}>
+                  {[0.5, 1].map((g, i) => <div key={i} style={{ position: "absolute", left: 0, right: 0, bottom: `${g * 100}%`, borderTop: `1px solid ${SURFACE3}`, opacity: 0.45 }} />)}
+                  <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "flex-end", gap: 3, padding: "0 1px" }}>
+                    {data.map((d, i) => (
+                      <div key={i} style={{ flex: 1, display: "flex", flexDirection: "column", alignItems: "center", justifyContent: "flex-end", height: "100%" }} title={`${d.k}: ${d.v}`}>
+                        <div style={{ ...s.mono, fontSize: "0.48rem", color: d.v ? TEXT_SEC : TEXT_MUTED, lineHeight: 1, marginBottom: 2 }}>{d.v}</div>
+                        <div style={{ width: "100%", height: `${(d.v / max) * 88}%`, minHeight: d.v ? 3 : 1, background: d.v ? color : SURFACE3, borderRadius: "2px 2px 0 0" }} />
+                      </div>
+                    ))}
+                  </div>
                 </div>
-              ))}
+                <div style={{ display: "flex", gap: 3, marginTop: 4, padding: "0 1px" }}>
+                  {data.map((d, i) => <div key={i} style={{ flex: 1, textAlign: "center", ...s.mono, fontSize: "0.48rem", color: TEXT_MUTED }}>{d.k.slice(8)}</div>)}
+                </div>
+                <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, textAlign: "center", marginTop: 4, textTransform: "uppercase", letterSpacing: "0.08em" }}>Date</div>
+              </div>
             </div>
           );
         };
@@ -2549,36 +2564,55 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const sel = aggBy(perfCat, perfDiff);
         const selAcc = sel.answered ? Math.round((sel.correct / sel.answered) * 100) : null;
 
-        const LineChart = ({ data, accessor, color }) => {
-          const W = 100, H = 32;
+        const LineChart = ({ data, accessor, color, unit }) => {
+          const W = 100, H = 100, PLOT = 130;
           const pts = data.map(accessor);
           const mx = Math.max(1, ...pts), mn = Math.min(0, ...pts);
           const n = pts.length;
           const X = (i) => n <= 1 ? 0 : (i / (n - 1)) * W;
           const Y = (v) => H - ((v - mn) / ((mx - mn) || 1)) * H;
           const dd = pts.map((v, i) => `${i ? "L" : "M"}${X(i).toFixed(2)},${Y(v).toFixed(2)}`).join(" ");
+          const yticks = [mx, Math.round((mx + mn) / 2), mn];
+          const fmtY = (v) => `${Math.round(v)}${unit || ""}`;
           return (
-            <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: 64, display: "block", marginTop: 6 }}>
-              <path d={`${dd} L${W},${H} L0,${H} Z`} fill={color} opacity="0.12" />
-              <path d={dd} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
-            </svg>
+            <div style={{ display: "flex", marginTop: 8 }}>
+              <div style={{ width: 34, flexShrink: 0, height: PLOT, display: "flex", flexDirection: "column", justifyContent: "space-between", alignItems: "flex-end", paddingRight: 7, boxSizing: "border-box" }}>
+                {yticks.map((t, i) => <span key={i} style={{ ...s.mono, fontSize: "0.52rem", color: TEXT_MUTED, lineHeight: 1 }}>{fmtY(t)}</span>)}
+              </div>
+              <div style={{ flex: 1, minWidth: 0, height: PLOT, position: "relative", borderLeft: `1px solid ${SURFACE3}`, borderBottom: `1px solid ${SURFACE3}` }}>
+                <svg viewBox={`0 0 ${W} ${H}`} preserveAspectRatio="none" style={{ width: "100%", height: "100%", display: "block" }}>
+                  {[0, 50, 100].map((g, i) => <line key={i} x1="0" y1={g} x2={W} y2={g} stroke={SURFACE3} strokeWidth="0.75" opacity="0.5" vectorEffect="non-scaling-stroke" />)}
+                  <path d={`${dd} L${W},${H} L0,${H} Z`} fill={color} opacity="0.12" />
+                  <path d={dd} fill="none" stroke={color} strokeWidth="1.5" vectorEffect="non-scaling-stroke" />
+                </svg>
+              </div>
+            </div>
           );
         };
-        const Trend = ({ title, color, accessor, last }) => (
-          <div style={panel}>
-            <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
-              <div style={chartTitle}>{title}</div>
-              <div style={{ ...s.mono, fontSize: "0.7rem", color, fontWeight: 600 }}>{last}</div>
+        const Trend = ({ title, color, accessor, last, unit, yLabel }) => {
+          const n = viewSeries.length;
+          const tickIdx = n <= 1 ? [0] : [0, Math.floor((n - 1) / 2), n - 1];
+          return (
+            <div style={panel}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline" }}>
+                <div style={chartTitle}>{title}</div>
+                <div style={{ ...s.mono, fontSize: "0.7rem", color, fontWeight: 600 }}>{last}</div>
+              </div>
+              {hasHistory ? (
+                <>
+                  {yLabel && <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 9, marginBottom: 1 }}>{yLabel}{unit ? ` (${unit})` : ""}</div>}
+                  <LineChart data={viewSeries} accessor={accessor} color={color} unit={unit} />
+                  <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, paddingLeft: 34 }}>
+                    {tickIdx.map((ix, i) => <span key={i} style={{ ...s.mono, fontSize: "0.53rem", color: TEXT_MUTED }}>{fmtDate(viewSeries[ix]?.date)}</span>)}
+                  </div>
+                  <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, textAlign: "center", marginTop: 3, paddingLeft: 34, textTransform: "uppercase", letterSpacing: "0.08em" }}>Date</div>
+                </>
+              ) : (
+                <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "14px 0 4px" }}>Building history — the line fills in as days accrue.</div>
+              )}
             </div>
-            {hasHistory
-              ? <LineChart data={viewSeries} accessor={accessor} color={color} />
-              : <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "14px 0 4px" }}>Building history — the line fills in as days accrue.</div>}
-            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 4 }}>
-              <span style={{ ...s.mono, fontSize: "0.55rem", color: TEXT_MUTED }}>{viewSeries[0]?.date}</span>
-              <span style={{ ...s.mono, fontSize: "0.55rem", color: TEXT_MUTED }}>{viewSeries[viewSeries.length - 1]?.date}</span>
-            </div>
-          </div>
-        );
+          );
+        };
 
         if (acctView) {
           const now = Date.now();
@@ -2661,7 +2695,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               <div style={chartTitle}>Signups / day · last 14 days</div>
               <Bars data={signupSeries} color={GOLD} />
             </div>
-            <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} last={`${totalUsers} total`} />
+            <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} unit="" yLabel="Accounts" last={`${totalUsers} total`} />
 
             {/* ===== USER ENGAGEMENT ===== */}
             {secHead("User Engagement", "How many accounts play each day vs. the total")}
@@ -2680,7 +2714,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                       <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 5 }}>Daily participation</div>
                     </div>
                   </div>
-                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.totalAccounts ? Math.round((p.activeUsers / p.totalAccounts) * 100) : 0} last={`${partToday}% today`} />
+                  <Trend title="Daily participation · answered ÷ accounts" color={GOLD} accessor={p => p.totalAccounts ? Math.round((p.activeUsers / p.totalAccounts) * 100) : 0} unit="%" yLabel="Participation" last={`${partToday}% today`} />
                   <div style={{ ...panel, display: "flex", flexWrap: "wrap", gap: "8px 20px", padding: "13px 16px" }}>
                     {[
                       [`${mau}`, "Active · 30d"],
@@ -2720,7 +2754,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                   <Stat v={easiest ? `${easiest.acc}%` : "—"} l="Easiest category" sub={easiest ? easiest.c : ""} />
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <Trend title="Daily accuracy · full history" color="#6495ED" accessor={p => p.answers ? Math.round((p.correct / p.answers) * 100) : 0} last={`${accuracy}% all-time`} />
+                  <Trend title="Daily accuracy · full history" color="#6495ED" accessor={p => p.answers ? Math.round((p.correct / p.answers) * 100) : 0} unit="%" yLabel="Accuracy" last={`${accuracy}% all-time`} />
                 </div>
                 <div style={subTitle}>Accuracy by category</div>
                 <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "14px 15px" }}>
