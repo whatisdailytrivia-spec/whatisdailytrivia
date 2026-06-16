@@ -1521,6 +1521,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
   const [renameError, setRenameError] = useState("");
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [banterOpen, setBanterOpen] = useState(false);
+  const [winnersOpen, setWinnersOpen] = useState(false);
   const [banterUnread, setBanterUnread] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
@@ -1666,7 +1667,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     return (
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 20 }}>
-          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); setWinnersOpen(false); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {/* Banter */}
             <button onClick={() => setBanterOpen(true)} title="Group Banter" style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${banterUnread > 0 ? "rgba(224,92,92,0.55)" : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -1674,6 +1675,10 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
               {banterUnread > 0 && (
                 <span style={{ position: "absolute", top: -7, right: -6, minWidth: 17, height: 17, padding: "0 4px", borderRadius: 100, background: "#E05C5C", color: "#fff", fontSize: "0.62rem", fontWeight: 700, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SANS, boxShadow: "0 2px 6px rgba(0,0,0,0.4)" }}>{banterUnread > 9 ? "9+" : banterUnread}</span>
               )}
+            </button>
+            {/* Past Winners */}
+            <button onClick={() => setWinnersOpen(true)} title="Past winners" style={{ display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+              🏆 Winners
             </button>
             {/* Invite */}
             <div style={{ position: "relative" }}>
@@ -1744,11 +1749,6 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
           </>;
         })()}
 
-        {/* Past monthly winners */}
-        <div style={{ marginTop: 28 }}>
-          <GroupPastWinners code={g.code} />
-        </div>
-
         {/* Leave group */}
         <div style={{ marginTop: 8, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
           {confirmLeave ? (
@@ -1767,6 +1767,23 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         </div>
 
         {banterOpen && <GroupBanter group={g} user={user} onClose={() => setBanterOpen(false)} onSeen={() => setBanterUnread(0)} />}
+
+        {winnersOpen && (
+          <div onClick={() => setWinnersOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 400, background: "rgba(0,0,0,0.6)", backdropFilter: "blur(3px)", display: "flex", alignItems: "flex-end", justifyContent: "center" }}>
+            <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 560, maxHeight: "82vh", background: BLACK, border: `1px solid ${SURFACE3}`, borderRadius: "14px 14px 0 0", display: "flex", flexDirection: "column", overflow: "hidden", boxShadow: "0 -8px 40px rgba(0,0,0,0.6)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "14px 16px", borderBottom: `1px solid ${SURFACE2}`, flexShrink: 0 }}>
+                <div>
+                  <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE }}>🏆 Past Winners</div>
+                  <div style={{ ...s.mono, fontSize: "0.64rem", color: TEXT_MUTED, marginTop: 2 }}>{g.name}</div>
+                </div>
+                <button onClick={() => setWinnersOpen(false)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "6px 11px", cursor: "pointer", color: OFF_WHITE, fontSize: "1rem", lineHeight: 1 }}>✕</button>
+              </div>
+              <div style={{ padding: "16px", overflowY: "auto" }}>
+                <GroupPastWinners code={g.code} />
+              </div>
+            </div>
+          </div>
+        )}
       </div>
     );
   }
