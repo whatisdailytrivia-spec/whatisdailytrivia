@@ -144,6 +144,14 @@ const MEDAL = {
   bronze: { emoji: "🥉", label: "Third",  multiplier: 0.03 },
 };
 const getMedal = (pos) => pos === 0 ? "gold" : pos === 1 ? "silver" : pos === 2 ? "bronze" : null;
+// Today's first correct answerer (real players only), by earliest submission time. Resets daily.
+const firstCorrectFrom = (subs) => {
+  if (!subs) return null;
+  const correct = Object.entries(subs)
+    .filter(([u, sb]) => sb && sb.isCorrect && !isExcludedUser(u))
+    .sort((a, b) => new Date(a[1].time || 0) - new Date(b[1].time || 0));
+  return correct.length ? correct[0][0] : null;
+};
 
 // Speed-based scoring
 const GRACE_PERIOD = 15;                     // seconds at full points
@@ -599,7 +607,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     }
 
     // Update history
-    const prev = history || { totalAnswered: 0, totalCorrect: 0, totalPoints: 0, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, bestStreak: 0, responseTimes: [], categoryStats: {}, dailyLog: [] };
+    const prev = history || { totalAnswered: 0, totalCorrect: 0, totalPoints: 0, firstCorrects: 0, goldCorrects: 0, silverCorrects: 0, bronzeCorrects: 0, bestStreak: 0, responseTimes: [], categoryStats: {}, dailyLog: [] };
     const cat = question.category || "Wildcard";
     const catStats = prev.categoryStats[cat] || { answered: 0, correct: 0 };
     const allTimes = [...(prev.responseTimes || []), responseTime].slice(-90);
@@ -609,6 +617,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       totalCorrect: prev.totalCorrect + (correct ? 1 : 0),
       totalPoints: prev.totalPoints + pts,
       bestStreak: Math.max(prev.bestStreak || 0, streak),
+      firstCorrects: (prev.firstCorrects != null ? prev.firstCorrects : (prev.goldCorrects || 0)) + (isFirstCorrect ? 1 : 0),
       responseTimes: allTimes,
       categoryStats: { ...prev.categoryStats, [cat]: { answered: catStats.answered + 1, correct: catStats.correct + (correct ? 1 : 0) } },
       dailyLog: [...(prev.dailyLog || []).slice(-89), { date: todayKey(), correct, points: pts, responseTime, category: cat }],
@@ -723,11 +732,24 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
           /* ── Ready · Set · GO gate ─────────────────── */
           <div style={{ textAlign: "center", padding: "18px 8px 10px" }}>
             <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.22em", marginBottom: 14 }}>Ready · Set</div>
-            <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1.4, marginBottom: 10 }}>
-              Today's question is locked in.
+            <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color: OFF_WHITE, lineHeight: 1.4, marginBottom: 18 }}>
+              Tap GO to reveal Today's Question.
             </div>
-            <div style={{ color: TEXT_SEC, fontSize: "0.84rem", lineHeight: 1.65, maxWidth: 420, margin: "0 auto 22px" }}>
-              Tap GO to reveal it. Your clock starts the instant you do — {GRACE_PERIOD}s of full credit, then the score drops {Math.round(DECAY_RATE * 100)}% per second down to a {Math.round(SCORE_FLOOR * 100)}% floor. It keeps running even if you leave, so only tap when you're ready to answer.
+            <div style={{ maxWidth: 320, margin: "0 auto 18px", textAlign: "left", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "15px 20px" }}>
+              <div style={{ ...s.mono, fontSize: "0.64rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 11 }}>Scoring</div>
+              {[
+                `${GRACE_PERIOD} Second Grace Period (Full Credit)`,
+                `Then score drops ${Math.round(DECAY_RATE * 100)}% per second`,
+                `${Math.round(SCORE_FLOOR * 100)}% Score Floor`,
+              ].map((line, i) => (
+                <div key={i} style={{ display: "flex", gap: 9, alignItems: "flex-start", marginBottom: i < 2 ? 7 : 0 }}>
+                  <span style={{ color: GOLD, fontSize: "0.9rem", lineHeight: 1.35 }}>•</span>
+                  <span style={{ color: TEXT_SEC, fontSize: "0.85rem", lineHeight: 1.4 }}>{line}</span>
+                </div>
+              ))}
+            </div>
+            <div style={{ fontFamily: SERIF, fontSize: "1.02rem", fontStyle: "italic", color: GOLD, marginBottom: 22 }}>
+              Good Luck!
             </div>
             <button onClick={startClock}
               style={{ background: GOLD, color: BLACK, border: "none", borderRadius: 100, padding: "14px 48px", fontFamily: SERIF, fontWeight: 700, fontSize: "1.35rem", letterSpacing: "0.06em", cursor: "pointer", boxShadow: "0 6px 20px rgba(201,168,76,0.35)" }}>
@@ -824,11 +846,12 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED, marginBottom: 12 }}>Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
       {(() => {
         const { real } = orderBoard(leaderboard);
+        const firstCorrectToday = firstCorrectFrom(submissions);
         if (real.length === 0)
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
           <LBHeader />
-          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
     </div>
@@ -846,7 +869,7 @@ function LBHeader() {
   );
 }
 
-function LBRow({ entry, rank, isMe, host, todayStatus }) {
+function LBRow({ entry, rank, isMe, host, todayStatus, firstToday }) {
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   return (
     <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
@@ -857,6 +880,7 @@ function LBRow({ entry, rank, isMe, host, todayStatus }) {
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {host && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "1px 7px", letterSpacing: "0.08em" }}>HOST</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
+          {firstToday && !host && <span title="First correct today" style={{ ...s.mono, fontSize: "0.6rem", color: "#FFD700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.3)", borderRadius: 100, padding: "1px 7px", display: "inline-flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>🥇 First today</span>}
         </div>
         <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>
           {host
@@ -1001,11 +1025,12 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
       </div>
       {(() => {
         const { real, hosts } = orderBoard(leaderboard);
+        const firstCorrectToday = firstCorrectFrom(submissions);
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
         return <>
           <LBHeader />
-          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
           {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
@@ -1896,6 +1921,7 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
             <StatRow l="Accuracy" v={`${acc}%`} gold={acc >= 70} />
             <StatRow l="Total Points" v={(history.totalPoints || 0).toLocaleString()} gold />
             <StatRow l="Best Streak" v={`🔥 ${history.bestStreak || 0}`} />
+            <StatRow l="🥇 First to Answer" v={history.firstCorrects != null ? history.firstCorrects : (history.goldCorrects || 0)} gold />
             <StatRow l="Avg Speed" v={avgTime ? `${avgTime}s` : "—"} />
           </div>
 
