@@ -531,7 +531,7 @@ export default function App() {
         {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} setLeaderboard={setLeaderboard} saveLBEntry={saveLBEntry} />}
         {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
         {shownTab === "winners"     && <WinnersTab />}
-        {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} />}
+        {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} leaderboard={leaderboard} />}
         {shownTab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
         {shownTab === "archive"     && <ArchiveTab />}
         {shownTab === "rules"       && <RulesTab />}
@@ -1494,12 +1494,21 @@ function GroupBanter({ group, user, onClose, onSeen }) {
   );
 }
 
-function GroupsTab({ user, setUser, saveUser, users, submissions }) {
+function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard }) {
   // view: "home" | "create" | "join" | "group"
   const [view, setView] = useState("home");
   const [activeGroup, setActiveGroup] = useState(null);
   const [groupData, setGroupData] = useState({});
   const [groupLBs, setGroupLBs] = useState({});
+  // A group's leaderboard = its members shown with their CURRENT month global score
+  // (group scoring mirrors global). Derived live, so every member always appears
+  // immediately on join — no separate cache to seed or drift.
+  const boardFor = (g) => {
+    if (!g || !Array.isArray(g.members)) return [];
+    const byUser = {};
+    (leaderboard || []).forEach(e => { byUser[e.username] = e; });
+    return g.members.map(m => byUser[m] || { username: m, points: 0, correct: 0, answered: 0, streak: 0 });
+  };
   const [createName, setCreateName] = useState("");
   const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
@@ -1651,7 +1660,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
   // ── Group leaderboard view ──────────────────────────────────────────────
   if (view === "group" && activeGroup) {
     const g = groupData[activeGroup];
-    const lb = groupLBs[activeGroup] || [];
+    const lb = boardFor(g);
     if (!g) return null;
     const isCreator = g.createdBy === user.username;
     return (
@@ -1844,7 +1853,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
         <div style={{ marginBottom: 28 }}>
           {userGroupCodes.map(code => {
             const g = groupData[code];
-            const lb = groupLBs[code] || [];
+            const lb = boardFor(g);
             const myEntry = lb.find(e => e.username === user.username);
             const myRank = myEntry ? lb.indexOf(myEntry) + 1 : null;
             if (!g) return null;
