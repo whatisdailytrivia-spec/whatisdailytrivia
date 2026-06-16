@@ -2331,7 +2331,6 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       setTodLoading(false);
     })();
     return () => { cancelled = true; };
-    // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [adminUnlocked, todScope, todDate, analyticsSeries]);
 
   const loadAdminData = async () => {
