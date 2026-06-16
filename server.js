@@ -1,6 +1,7 @@
 const express = require("express");
 const path    = require("path");
 const cron    = require("node-cron");
+const crypto  = require("crypto");
 const app     = express();
 
 app.use(express.json());
@@ -204,13 +205,44 @@ async function finalizeAnalytics() {
   }
 }
 
+// ─── Auth helpers ─────────────────────────────────────────────────────────────
+// Passwords are hashed (scrypt + per-user salt) and kept in cred:<username>, which
+// the storage API never serves. The public users blob carries profile only.
+
+const hashPw = (pw) => {
+  const salt = crypto.randomBytes(16).toString("hex");
+  const hash = crypto.scryptSync(String(pw), salt, 64).toString("hex");
+  return `${salt}:${hash}`;
+};
+const verifyPw = (pw, stored) => {
+  if (!stored || typeof stored !== "string" || stored.indexOf(":") < 0) return false;
+  const [salt, hash] = stored.split(":");
+  const test = crypto.scryptSync(String(pw), salt, 64).toString("hex");
+  const a = Buffer.from(hash, "hex"), b = Buffer.from(test, "hex");
+  return a.length === b.length && crypto.timingSafeEqual(a, b);
+};
+// Remove plaintext passwords from the users blob before it ever leaves the server.
+const stripUserSecrets = (value) => {
+  try {
+    const u = JSON.parse(value);
+    for (const k in u) { if (u[k] && typeof u[k] === "object") delete u[k].password; }
+    return JSON.stringify(u);
+  } catch (e) { return value; }
+};
+// Null out a legacy plaintext password at rest (atomic, scoped to one record).
+const scrubPassword = (username) =>
+  evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ password: null }), "merge"]);
+
 // ─── Storage API routes ───────────────────────────────────────────────────────
 
 app.get("/api/storage/:key", async (req, res) => {
   try {
-    const value = await dbGet(req.params.key);
+    const key = req.params.key;
+    if (key.indexOf("cred:") === 0) return res.status(403).json({ error: "Forbidden" });
+    let value = await dbGet(key);
     if (value === null) return res.status(404).json({ error: "Not found" });
-    res.json({ key: req.params.key, value });
+    if (key === "users") value = stripUserSecrets(value);
+    res.json({ key, value });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -225,14 +257,17 @@ app.post("/api/storage", async (req, res) => {
 
 app.delete("/api/storage/:key", async (req, res) => {
   try {
-    await dbDelete(req.params.key);
-    res.json({ key: req.params.key, deleted: true });
+    const key = req.params.key;
+    const PROTECTED = ["users", "cred:", "leaderboard:", "submissions:", "question:", "question_bank", "archive", "halloffame:", "analytics_series", "launch_date"];
+    if (PROTECTED.some((pre) => key === pre || key.indexOf(pre) === 0)) return res.status(403).json({ error: "Protected key" });
+    await dbDelete(key);
+    res.json({ key, deleted: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
 app.get("/api/storage", async (req, res) => {
   try {
-    const keys = await dbList(req.query.prefix || "");
+    const keys = (await dbList(req.query.prefix || "")).filter((k) => k.indexOf("cred:") !== 0);
     res.json({ keys });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -323,6 +358,67 @@ app.post("/api/append", async (req, res) => {
     const { key, value } = req.body;
     if (!key || value == null) return res.status(400).json({ error: "key and value required" });
     res.json(await evalJson(ARR_APPEND_LUA, key, [String(value)]));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// ─── Auth routes ──────────────────────────────────────────────────────────────
+
+// Register: atomically claim the username (profile only) + store hashed credential.
+app.post("/api/register", async (req, res) => {
+  try {
+    const { username, password, profile } = req.body;
+    if (!username || !password || !profile) return res.status(400).json({ error: "username, password, profile required" });
+    const claim = await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify(profile), "setnx"]);
+    if (claim && claim.taken) return res.json({ ok: false, taken: true });
+    await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(password), email: profile.email || "" }));
+    res.json({ ok: true, user: profile });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Login: verify server-side; never returns the password. Lazy-migrates legacy
+// plaintext accounts to a hashed credential on first successful login.
+app.post("/api/login", async (req, res) => {
+  try {
+    const { username, password } = req.body;
+    if (!username || !password) return res.status(400).json({ error: "username and password required" });
+    const usersRaw = await dbGet("users");
+    const users = usersRaw ? JSON.parse(usersRaw) : {};
+    const rec = users[username];
+    if (!rec) return res.json({ ok: false });
+    const credRaw = await dbGet(`cred:${username}`);
+    let valid = false;
+    if (credRaw) {
+      valid = verifyPw(password, JSON.parse(credRaw).hash);
+    } else if (rec.password != null) {
+      valid = String(rec.password) === String(password);
+      if (valid) {
+        await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(password), email: rec.email || "" }));
+        await scrubPassword(username);
+      }
+    }
+    if (!valid) return res.json({ ok: false });
+    const safe = Object.assign({}, rec); delete safe.password;
+    res.json({ ok: true, user: safe });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Change password: requires the current password, updates the hashed credential.
+app.post("/api/change-password", async (req, res) => {
+  try {
+    const { username, currentPassword, newPassword } = req.body;
+    if (!username || !currentPassword || !newPassword) return res.status(400).json({ error: "missing fields" });
+    const usersRaw = await dbGet("users");
+    const users = usersRaw ? JSON.parse(usersRaw) : {};
+    const rec = users[username];
+    if (!rec) return res.json({ ok: false, error: "not found" });
+    const credRaw = await dbGet(`cred:${username}`);
+    let ok = false;
+    if (credRaw) ok = verifyPw(currentPassword, JSON.parse(credRaw).hash);
+    else if (rec.password != null) ok = String(rec.password) === String(currentPassword);
+    if (!ok) return res.json({ ok: false, error: "wrong current password" });
+    await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(newPassword), email: rec.email || "" }));
+    await scrubPassword(username);
+    res.json({ ok: true });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
