@@ -370,6 +370,13 @@ export default function App() {
         try { localStorage.setItem("whatis_user", JSON.stringify(nu)); } catch (e) {}
         return nu;
       });
+      // Back-fill the group board with the player's current month global score so they
+      // appear on the group leaderboard immediately, not only after their next answer.
+      try {
+        const gl = await apiStorage.get(`leaderboard:${monthKey()}`).catch(() => null);
+        const gEntry = gl ? (JSON.parse(gl.value) || []).find(e => e.username === username) : null;
+        if (gEntry) await upsertEntry(`grouplb:${code}:${monthKey()}`, { ...gEntry });
+      } catch (e) {}
       return { ok: true, name: g.name, code };
     } catch (e) { return { ok: false }; }
   };
@@ -1587,6 +1594,12 @@ function GroupsTab({ user, setUser, saveUser, users, submissions }) {
       const nu = { ...user, groups: updatedGroups };
       await saveUser(user.username, { groups: updatedGroups });
       setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
+      // Back-fill the group board with the player's current month global score
+      try {
+        const gl = await apiStorage.get(`leaderboard:${monthKey()}`).catch(() => null);
+        const gEntry = gl ? (JSON.parse(gl.value) || []).find(e => e.username === user.username) : null;
+        if (gEntry) await upsertEntry(`grouplb:${code}:${monthKey()}`, { ...gEntry });
+      } catch (e) {}
       const lbR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
       const grp = { ...groupData, [code]: group };
       const glb = { ...groupLBs, [code]: lbR ? JSON.parse(lbR.value) : [] };
