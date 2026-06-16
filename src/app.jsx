@@ -282,6 +282,11 @@ export default function App() {
 
   const loadAll = async () => {
     setLoading(true);
+    // Capture a referral code from the URL (?ref=) so it survives until the user signs up
+    try {
+      const refParam = new URLSearchParams(window.location.search).get("ref");
+      if (refParam) localStorage.setItem("whatis_ref", refParam);
+    } catch (e) {}
     // Clean up stale submission entries from previous days
     const today = todayKey();
     Object.keys(localStorage)
@@ -494,6 +499,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [history, setHistory] = useState(null);
   const [reveal, setReveal] = useState(null);   // today's answer, fetched once the user has submitted
   const [submitting, setSubmitting] = useState(false);
+  const [refCopied, setRefCopied] = useState(false);
   const answered = user && submissions[user.username];
   const started = viewStart != null;
 
@@ -574,7 +580,8 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       const email = form.email.trim().toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
-      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
+      const referredBy = (() => { try { const r = localStorage.getItem("whatis_ref"); return (r && r.toLowerCase() !== form.username.toLowerCase()) ? r : ""; } catch (e) { return ""; } })();
+      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy };
       let res;
       try {
         res = await atomicPost("/api/register", { username: form.username, password: form.password, profile });
@@ -587,6 +594,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       const u = res.user || profile;
       setUser(u); localStorage.setItem("whatis_user", JSON.stringify(u));
       setUsers(prev => ({ ...prev, [form.username]: u }));
+      try { localStorage.removeItem("whatis_ref"); } catch (e) {}
     } else {
       let res;
       try {
@@ -949,6 +957,30 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
           <LBHeader />
           {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
+      })()}
+
+      {/* ── Refer a Friend ─────────────────────────────── */}
+      {user && (() => {
+        const refLink = `${window.location.origin}/?ref=${encodeURIComponent(user.username)}`;
+        const refMsg = `Join me on WhatIs… Daily Trivia 🧠 — one trivia question every morning, climb the leaderboard, and the top scorer each month wins $100. Play: ${refLink}`;
+        const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.8rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
+        return (
+          <div style={{ ...s.card, padding: "18px 20px", marginTop: 22 }}>
+            <div style={s.accent} />
+            <div style={{ ...s.label, fontSize: "0.78rem", marginBottom: 6 }}>Refer a Friend</div>
+            <div style={{ color: TEXT_SEC, fontSize: "0.84rem", lineHeight: 1.5, marginBottom: 14 }}>
+              Share your link — every friend who joins makes the leaderboard tougher. 🏆
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+              <span style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{refLink}</span>
+            </div>
+            <div style={{ display: "flex", gap: 8 }}>
+              <a href={`sms:?&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>💬 Text</a>
+              <a href={`mailto:?subject=${encodeURIComponent("Play WhatIs… Daily Trivia with me")}&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>✉️ Email</a>
+              <button onClick={() => { try { navigator.clipboard.writeText(refLink); } catch (e) {} setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); }} style={{ ...shareBtn, ...(refCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{refCopied ? "✓ Copied!" : "🔗 Copy"}</button>
+            </div>
+          </div>
+        );
       })()}
     </div>
   );
@@ -2851,6 +2883,43 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               <Bars data={signupSeries} color={GOLD} />
             </div>
             <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} unit="" yLabel="Accounts" last={`${totalUsers} total`} />
+
+            {/* ===== REFERRALS ===== */}
+            {secHead("Referrals", "Accounts created from shared referral links")}
+            {(() => {
+              const referred = users.filter(u => u && u.referredBy);
+              const byRef = {};
+              referred.forEach(u => { const r = u.referredBy; (byRef[r] = byRef[r] || []).push(u); });
+              const rows = Object.entries(byRef).map(([r, list]) => ({ r, list })).sort((a, b) => b.list.length - a.list.length);
+              const pct = totalUsers ? Math.round((referred.length / totalUsers) * 100) : 0;
+              return (
+                <>
+                  <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr 1fr", gap: 8 }}>
+                    <Stat v={referred.length} l="Referred signups" gold />
+                    <Stat v={`${pct}%`} l="Of all accounts" />
+                    <Stat v={rows.length} l="Referrers" />
+                  </div>
+                  {rows.length === 0 ? (
+                    <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "14px 2px 2px" }}>No referral signups yet — players share their link from the Today's Question screen.</div>
+                  ) : (
+                    <div style={{ marginTop: 10 }}>
+                      <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Who referred whom</div>
+                      {rows.map(({ r, list }) => (
+                        <div key={r} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "11px 14px", marginBottom: 6 }}>
+                          <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8 }}>
+                            <div style={{ fontWeight: 600, fontSize: "0.86rem", color: OFF_WHITE, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r}</div>
+                            <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, flexShrink: 0 }}>{list.length} joined</div>
+                          </div>
+                          <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, marginTop: 5, lineHeight: 1.5 }}>
+                            {list.map(u => u.displayName || u.username).join(", ")}
+                          </div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </>
+              );
+            })()}
 
             {/* ===== USER ENGAGEMENT ===== */}
             {secHead("User Engagement", "How many accounts play each day vs. the total")}
