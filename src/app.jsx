@@ -509,7 +509,7 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
     if (authMode === "register") {
       if (!form.username || !form.email || !form.password || !form.state) return setError("All fields required.");
       if (users[form.username]) return setError("Username taken.");
-      const nu = { username: form.username, email: form.email, password: form.password, state: form.state, streak: 0, joined: todayKey() };
+      const nu = { username: form.username, email: form.email, password: form.password, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now() };
       const res = await registerUser(form.username, nu);
       if (!res.ok) return setError("Username taken.");
       setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
@@ -1941,6 +1941,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [analyticsRange, setAnalyticsRange]   = useState("All"); // 30D | 90D | All
   const [perfCat, setPerfCat]   = useState("All"); // category filter for difficulty cross-tab
   const [perfDiff, setPerfDiff] = useState("All"); // difficulty filter for cross-tab
+  const [acctView, setAcctView] = useState(false);     // show the New Accounts page
+  const [acctRange, setAcctRange] = useState("24h");   // 24h | 7d | all
 
   // ── 6 month slots: current month + 5 ahead ──────────────────────────────
   const getMonthSlots = () => {
@@ -2309,10 +2311,13 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         };
         const accColor = (a) => a >= 70 ? "#4CAF7D" : a >= 40 ? GOLD : "#E05C5C";
         const fmtDate = (d) => { const dt = new Date(d + "T00:00:00"); return dt.toLocaleDateString("en-US", { month: "short", day: "numeric" }); };
-        const secHead = (t, sub) => (
-          <div style={{ marginTop: 30, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${SURFACE3}` }}>
-            <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE }}>{t}</div>
-            {sub && <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 3 }}>{sub}</div>}
+        const secHead = (t, sub, action) => (
+          <div style={{ marginTop: 30, marginBottom: 14, paddingBottom: 8, borderBottom: `1px solid ${SURFACE3}`, display: "flex", alignItems: "flex-end", justifyContent: "space-between", gap: 10 }}>
+            <div>
+              <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE }}>{t}</div>
+              {sub && <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 3 }}>{sub}</div>}
+            </div>
+            {action}
           </div>
         );
         const panel = { background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "12px 14px", marginTop: 10 };
@@ -2375,6 +2380,61 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           </div>
         );
 
+        if (acctView) {
+          const now = Date.now();
+          const rangeMs = acctRange === "24h" ? 24 * 3600 * 1000 : acctRange === "7d" ? 7 * 24 * 3600 * 1000 : Infinity;
+          const rel = (ms) => { const d = now - ms; const m = Math.floor(d / 60000); if (m < 1) return "just now"; if (m < 60) return `${m}m ago`; const h = Math.floor(m / 60); if (h < 24) return `${h}h ago`; return `${Math.floor(h / 24)}d ago`; };
+          const dayMs = (j) => { try { const [y, mo, da] = j.split("-").map(Number); return new Date(y, mo - 1, da).getTime(); } catch (e) { return 0; } };
+          const rows = Object.values(adminUsers)
+            .map(u => { const hasTime = typeof u.createdAt === "number"; return { u, hasTime, t: hasTime ? u.createdAt : (u.joined ? dayMs(u.joined) : 0) }; })
+            .filter(r => r.t > 0 && (now - r.t) <= rangeMs)
+            .sort((a, b) => b.t - a.t);
+          const rangeLabel = acctRange === "24h" ? "last 24 hours" : acctRange === "7d" ? "last 7 days" : "all time";
+          return (
+            <div>
+              <button onClick={() => setAcctView(false)} style={{ ...s.btnSec, marginBottom: 18, display: "inline-flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Analytics</button>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 10, marginBottom: 6 }}>
+                <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE }}>New Accounts</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {[["24h", "24 hours"], ["7d", "7 days"], ["all", "All"]].map(([k, l]) => (
+                    <button key={k} onClick={() => setAcctRange(k)} style={{ padding: "5px 11px", borderRadius: 6, fontSize: "0.7rem", cursor: "pointer", fontFamily: SANS, border: acctRange === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: acctRange === k ? "rgba(201,168,76,0.12)" : "transparent", color: acctRange === k ? GOLD : TEXT_SEC }}>{l}</button>
+                  ))}
+                </div>
+              </div>
+              <div style={{ color: TEXT_SEC, fontSize: "0.82rem", marginBottom: 18 }}>{rows.length} account{rows.length !== 1 ? "s" : ""} created in the {rangeLabel}, newest first.</div>
+              {rows.length === 0
+                ? <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No new accounts in the {rangeLabel}.</div></div>
+                : rows.map((r, i) => {
+                    const u = r.u;
+                    const name = u.displayName || u.username;
+                    const when = r.hasTime
+                      ? new Date(r.t).toLocaleString("en-US", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" })
+                      : (u.joined ? `${fmtDate(u.joined)} · time n/a` : "—");
+                    return (
+                      <div key={u.username} style={{ display: "grid", gridTemplateColumns: "28px 1fr auto", alignItems: "center", gap: 12, padding: "11px 14px", background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, marginBottom: 6 }}>
+                        <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED, textAlign: "center" }}>{i + 1}</div>
+                        <div style={{ minWidth: 0 }}>
+                          <div style={{ fontWeight: 600, fontSize: "0.88rem", color: OFF_WHITE, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
+                            {name}
+                            {u.state && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{u.state}</span>}
+                          </div>
+                          <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "no email"}</div>
+                        </div>
+                        <div style={{ textAlign: "right", flexShrink: 0 }}>
+                          <div style={{ ...s.mono, fontSize: "0.72rem", color: r.hasTime ? GOLD : TEXT_MUTED }}>{r.hasTime ? rel(r.t) : "—"}</div>
+                          <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 2 }}>{when}</div>
+                        </div>
+                      </div>
+                    );
+                  })
+              }
+              <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 16, lineHeight: 1.6 }}>
+                Exact creation time is recorded for accounts created from now on; accounts created earlier show their join date only ("time n/a").
+              </div>
+            </div>
+          );
+        }
+
         return (
           <div>
             <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>Across all {totalUsers} account{totalUsers !== 1 ? "s" : ""}.</div>
@@ -2388,7 +2448,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             </div>
 
             {/* ===== USER ACCOUNT CREATION ===== */}
-            {secHead("User Account Creation", "How fast the player base is growing")}
+            {secHead("User Account Creation", "How fast the player base is growing",
+              <button onClick={() => { setAcctRange("24h"); setAcctView(true); }} style={{ padding: "6px 12px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: `1px solid ${GOLD}`, background: "rgba(201,168,76,0.12)", color: GOLD, whiteSpace: "nowrap", flexShrink: 0 }}>👥 New accounts →</button>
+            )}
             <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
               <Stat v={totalUsers} l="Total accounts" gold />
               <Stat v={`+${newToday}`} l="New today" />
