@@ -492,6 +492,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [viewStart, setViewStart] = useState(null);  // set when they hit GO; persisted so the clock survives refresh
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState(null);
+  const [reveal, setReveal] = useState(null);   // today's answer, fetched once the user has submitted
   const [submitting, setSubmitting] = useState(false);
   const answered = user && submissions[user.username];
   const started = viewStart != null;
@@ -534,6 +535,21 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     const id = setInterval(() => setElapsed(Math.round((Date.now() - viewStart) / 1000)), 200);
     return () => clearInterval(id);
   }, [answered, result, viewStart]);
+
+  // Once the user has submitted, fetch the answer to reveal. The answer is not
+  // shipped with the question and the shared submission omits it, so we ask the
+  // server, which only reveals it to a user who has already answered today.
+  useEffect(() => {
+    const sub = result || (user && submissions[user.username]);
+    if (!user || !sub) { setReveal(null); return; }
+    if (sub.displayAnswer) { setReveal(sub.displayAnswer); return; }
+    let cancelled = false;
+    fetch(`/api/reveal?username=${encodeURIComponent(user.username)}`)
+      .then(r => r.json())
+      .then(d => { if (!cancelled && d && d.ok && d.displayAnswer) setReveal(d.displayAnswer); })
+      .catch(() => {});
+    return () => { cancelled = true; };
+  }, [user?.username, result, submissions]);
 
   const loadHistory = async (username) => {
     try { const r = await apiStorage.get(`history:${username}`); if (r) setHistory(JSON.parse(r.value)); } catch (e) {}
@@ -914,7 +930,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               </div>
               <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(76,175,125,0.08)", border: "1px solid rgba(76,175,125,0.25)", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
-                <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || question?.displayAnswer || question?.answer}</div>
+                <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
               </div>
             </div>
           );
