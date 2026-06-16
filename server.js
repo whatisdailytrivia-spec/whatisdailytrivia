@@ -527,6 +527,22 @@ app.post("/api/grade", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Reveal today's answer — ONLY to a user who has already submitted today.
+app.get("/api/reveal", async (req, res) => {
+  try {
+    const username = req.query.username;
+    if (!username) return res.status(400).json({ error: "username required" });
+    const date = getESTDate();
+    const subsRaw = await dbGet(`submissions:${date}`);
+    const subs = subsRaw ? JSON.parse(subsRaw) : {};
+    if (!subs[username]) return res.json({ ok: false });   // not answered → no reveal
+    const qRaw = await dbGet(`question:${date}`);
+    if (!qRaw) return res.json({ ok: false });
+    const q = JSON.parse(qRaw);
+    res.json({ ok: true, displayAnswer: q.displayAnswer || q.answer });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // ─── Auth routes ──────────────────────────────────────────────────────────────
 
 // Register: atomically claim the username (profile only) + store hashed credential.
