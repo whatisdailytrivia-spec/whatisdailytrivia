@@ -693,16 +693,16 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
       {/* ── Header ────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
-          <div style={{ ...s.label, fontSize: "0.72rem", marginBottom: 4 }}>Daily Question</div>
-          <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: OFF_WHITE }}>
+          <div style={{ ...s.label, fontSize: "0.82rem", marginBottom: 5 }}>Daily Question</div>
+          <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE }}>
             {new Date().toLocaleDateString("en-US", { month: "long", day: "numeric", year: "numeric" })}
           </div>
         </div>
         <div style={{ textAlign: "right" }}>
-          <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, marginBottom: 5 }}>
+          <div style={{ ...s.mono, fontSize: "0.82rem", color: TEXT_SEC, marginBottom: 6 }}>
             # of Players: <span style={{ color: OFF_WHITE, fontWeight: 600 }}>{orderBoard(leaderboard).real.length}</span>
           </div>
-          <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC }}>
+          <div style={{ ...s.mono, fontSize: "0.82rem", color: TEXT_SEC }}>
             This Month's Prize: <span style={{ color: GOLD, fontWeight: 600 }}>$100</span>
           </div>
         </div>
@@ -714,9 +714,9 @@ function PlayTab({ user, setUser, users, saveUser, registerUser, question, submi
 
         {/* Card label row */}
         <div style={{ display: "flex", alignItems: "center", gap: 8, marginBottom: 14 }}>
-          <div style={{ ...s.label, fontSize: "0.65rem", margin: 0 }}>Today's Question</div>
-          <span style={{ ...s.badge, background: cat.bg, color: cat.text }}>{question?.category}</span>
-          <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{question?.points || 200} pts</span>
+          <div style={{ ...s.label, fontSize: "0.78rem", margin: 0 }}>Today's Question</div>
+          <span style={{ ...s.badge, background: cat.bg, color: cat.text, fontSize: "0.74rem" }}>{question?.category}</span>
+          <span style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED }}>{question?.points || 200} pts</span>
         </div>
 
         {(!answered && !result && !started) ? (
