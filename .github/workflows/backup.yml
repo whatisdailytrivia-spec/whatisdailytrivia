@@ -1,0 +1,36 @@
+name: Daily backup
+
+# Pulls a full database export each morning (before the drop, low-traffic) and
+# stores it as an ENCRYPTED artifact on the workflow run, retained 90 days.
+# Encryption means the backup is safe even if the repo (and its Actions
+# artifacts) are public.
+on:
+  schedule:
+    - cron: '0 9 * * *'     # ~04:00–05:00 America/New_York
+  workflow_dispatch: {}      # lets you run a backup on demand
+
+jobs:
+  backup:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Export and encrypt
+        env:
+          TASK_TOKEN: ${{ secrets.ADMIN_TASK_TOKEN }}
+          BACKUP_KEY: ${{ secrets.BACKUP_ENCRYPTION_KEY }}
+        run: |
+          curl -fsS "https://whatisdailytrivia.onrender.com/api/export" \
+            -H "x-task-token: $TASK_TOKEN" \
+            --max-time 180 \
+            -o backup.json
+          echo "Raw export: $(wc -c < backup.json) bytes"
+          openssl enc -aes-256-cbc -pbkdf2 -salt \
+            -in backup.json -out backup.json.enc -pass pass:"$BACKUP_KEY"
+          rm -f backup.json
+          echo "Encrypted backup: $(wc -c < backup.json.enc) bytes"
+
+      - name: Upload encrypted backup
+        uses: actions/upload-artifact@v4
+        with:
+          name: whatis-backup-${{ github.run_id }}
+          path: backup.json.enc
+          retention-days: 90
