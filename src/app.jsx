@@ -500,6 +500,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [reveal, setReveal] = useState(null);   // today's answer, fetched once the user has submitted
   const [submitting, setSubmitting] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
+  const [refOpen, setRefOpen] = useState(false);
   const answered = user && submissions[user.username];
   const started = viewStart != null;
 
@@ -945,6 +946,35 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         })()}
       </div>
 
+      {/* ── Refer a Friend (collapsible, above Top 5) ───── */}
+      {user && (() => {
+        const refLink = `${window.location.origin}/?ref=${encodeURIComponent(user.username)}`;
+        const refMsg = `Join me on WhatIs... Daily Trivia — one trivia question every morning, climb the leaderboard, and the top scorer each month wins $100. Play: ${refLink}`;
+        const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.82rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
+        return (
+          <div style={{ margin: "4px 0 18px" }}>
+            <button onClick={() => setRefOpen(o => !o)} style={{ width: "100%", background: refOpen ? "transparent" : GOLD, color: refOpen ? GOLD : BLACK, border: refOpen ? `1px solid ${GOLD}` : "none", borderRadius: 10, padding: "13px 18px", fontFamily: SANS, fontWeight: 700, fontSize: "0.95rem", cursor: "pointer" }}>
+              Refer a Friend
+            </button>
+            {refOpen && (
+              <div style={{ ...s.card, padding: "16px 18px", marginTop: 8 }}>
+                <div style={{ color: TEXT_SEC, fontSize: "0.82rem", lineHeight: 1.5, marginBottom: 12 }}>
+                  Share your link — every friend who joins makes the leaderboard tougher.
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
+                  <span style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{refLink}</span>
+                </div>
+                <div style={{ display: "flex", gap: 8 }}>
+                  <a href={`sms:?&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>Text</a>
+                  <a href={`mailto:?subject=${encodeURIComponent("Play WhatIs... Daily Trivia with me")}&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>Email</a>
+                  <button onClick={() => { try { navigator.clipboard.writeText(refLink); } catch (e) {} setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); }} style={{ ...shareBtn, ...(refCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{refCopied ? "Copied!" : "Copy"}</button>
+                </div>
+              </div>
+            )}
+          </div>
+        );
+      })()}
+
             <hr style={s.divider} />
       <div style={{ ...s.label, fontSize: "0.82rem", marginBottom: 5 }}>Top 5 this month</div>
       <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED, marginBottom: 12 }}>Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
@@ -957,30 +987,6 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
           <LBHeader />
           {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
-      })()}
-
-      {/* ── Refer a Friend ─────────────────────────────── */}
-      {user && (() => {
-        const refLink = `${window.location.origin}/?ref=${encodeURIComponent(user.username)}`;
-        const refMsg = `Join me on WhatIs… Daily Trivia 🧠 — one trivia question every morning, climb the leaderboard, and the top scorer each month wins $100. Play: ${refLink}`;
-        const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", gap: 6, padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.8rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
-        return (
-          <div style={{ ...s.card, padding: "18px 20px", marginTop: 22 }}>
-            <div style={s.accent} />
-            <div style={{ ...s.label, fontSize: "0.78rem", marginBottom: 6 }}>Refer a Friend</div>
-            <div style={{ color: TEXT_SEC, fontSize: "0.84rem", lineHeight: 1.5, marginBottom: 14 }}>
-              Share your link — every friend who joins makes the leaderboard tougher. 🏆
-            </div>
-            <div style={{ display: "flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
-              <span style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{refLink}</span>
-            </div>
-            <div style={{ display: "flex", gap: 8 }}>
-              <a href={`sms:?&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>💬 Text</a>
-              <a href={`mailto:?subject=${encodeURIComponent("Play WhatIs… Daily Trivia with me")}&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>✉️ Email</a>
-              <button onClick={() => { try { navigator.clipboard.writeText(refLink); } catch (e) {} setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); }} style={{ ...shareBtn, ...(refCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{refCopied ? "✓ Copied!" : "🔗 Copy"}</button>
-            </div>
-          </div>
-        );
       })()}
     </div>
   );
