@@ -949,7 +949,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       {/* ── Refer a Friend (collapsible, above Top 5) ───── */}
       {user && (() => {
         const refLink = `${window.location.origin}/?ref=${encodeURIComponent(user.username)}`;
-        const refMsg = `Join me on WhatIs... Daily Trivia — one trivia question every morning, climb the leaderboard, and the top scorer each month wins $100. Play: ${refLink}`;
+        const refMsg = `Join me on WhatIs... Daily Trivia - One Question. Every Morning. Monthly Prizes. ${refLink}`;
         const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.82rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
         return (
           <div style={{ margin: "4px 0 18px" }}>
