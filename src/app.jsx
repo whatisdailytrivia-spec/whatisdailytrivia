@@ -189,8 +189,12 @@ const fmtTime = (s) => `${Math.floor(s / 60)}:${String(s % 60).padStart(2, "0")}
 const SAMPLE = { id: "q1", question: "This financial instrument allows investors to pool capital and gain exposure to real estate without directly owning property — and is required by law to distribute at least 90% of its taxable income to shareholders.", answer: "REIT", displayAnswer: "A Real Estate Investment Trust (REIT)", category: "Finance", points: 200 };
 
 const etDateStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/New_York", year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
-const todayKey = () => etDateStr();           // Eastern — matches the server's question/scoring day
-const monthKey = () => etDateStr().slice(0, 7);
+// The player's LOCAL calendar day. The answer deadline is the player's local
+// midnight: once their local date rolls over, the current question stops showing.
+// (The server validates this date so old questions can't be backfilled.)
+const localDateStr = () => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
+const todayKey = () => localDateStr();
+const monthKey = () => localDateStr().slice(0, 7);
 const daysLeft = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate() - d.getDate(); };
 const normalize = (s) => s.toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
 const checkAnswer = (u, c, aliases = []) => {
@@ -607,7 +611,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     if (!user || !sub) { setReveal(null); return; }
     if (sub.displayAnswer) { setReveal(sub.displayAnswer); return; }
     let cancelled = false;
-    fetch(`/api/reveal?username=${encodeURIComponent(user.username)}`)
+    fetch(`/api/reveal?username=${encodeURIComponent(user.username)}&date=${todayKey()}`)
       .then(r => r.json())
       .then(d => { if (!cancelled && d && d.ok && d.displayAnswer) setReveal(d.displayAnswer); })
       .catch(() => {});
@@ -627,7 +631,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     setViewStart(now);
     setElapsed(0);
     // Anchor the authoritative clock on the server (first reveal wins; can't be reset)
-    atomicPost("/api/start", { username: user.username }).catch(() => {});
+    atomicPost("/api/start", { username: user.username, date: todayKey() }).catch(() => {});
   };
 
   const doAuth = async () => {
@@ -679,7 +683,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     setSubmitting(true);
     let resp;
     try {
-      resp = await atomicPost("/api/grade", { username: user.username, guess: answer });
+      resp = await atomicPost("/api/grade", { username: user.username, guess: answer, date: todayKey() });
     } catch (e) {
       // Grading endpoint not available yet (deploy gap) — fall back to the legacy client path
       setSubmitting(false);
@@ -791,21 +795,22 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
 
   const cat = CAT[question?.category] || CAT.Wildcard;
 
-  // Pre-window: between user's local midnight and 6am EST, no real question is live yet
+  // The active question is the one for the player's LOCAL day. If it isn't live yet
+  // — before today's 6am ET drop, or after the player's local midnight while
+  // tomorrow's question hasn't dropped — show the resting screen. This is what makes
+  // the deadline the player's own local midnight.
   const hasRealQuestion = question && question.id !== "q1";
-  const estHour = parseInt(new Intl.DateTimeFormat("en-US", {
-    timeZone: "America/New_York", hour: "numeric", hour12: false,
-  }).format(new Date()), 10);
-  const isPreWindow = user && !hasRealQuestion && estHour < 6;
+  const isPreWindow = user && !hasRealQuestion;
 
-  // Auto-reload: if it's past 6am EST but we still have the SAMPLE, silently re-fetch
+  // While resting, poll for the 6am ET drop so the question appears automatically.
   useEffect(() => {
-    if (!hasRealQuestion && estHour >= 6) {
-      apiStorage.get(`question:${todayKey()}`).then(r => {
-        if (r) { try { setQuestion(JSON.parse(r.value)); } catch(e) {} }
-      }).catch(() => {});
-    }
-  }, [hasRealQuestion, estHour]);
+    if (hasRealQuestion) return;
+    const tick = () => apiStorage.get(`question:${todayKey()}`).then(r => {
+      if (r) { try { setQuestion(JSON.parse(r.value)); } catch (e) {} }
+    }).catch(() => {});
+    const id = setInterval(tick, 60000);
+    return () => clearInterval(id);
+  }, [hasRealQuestion]);
 
   if (!user) return (
     <div>
