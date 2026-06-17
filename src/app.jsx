@@ -2365,6 +2365,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [pw, setPw]             = useState("");
   const [pwErr, setPwErr]       = useState("");
   const [section, setSection]   = useState("analytics");
+  const [adminGroups, setAdminGroups] = useState(null); // all groups (admin manager)
+  const [delGroupCode, setDelGroupCode] = useState(null); // group pending delete confirm
+  const [groupBusy, setGroupBusy] = useState(false);
   const [saved, setSaved]       = useState(false);
   const [monthBanks, setMonthBanks] = useState({});    // { "2026-07": [...], ... }
   const [uploadStatus, setUploadStatus] = useState({}); // { "2026-07": "success"|"error" }
@@ -2426,6 +2429,44 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const tomorrowMonthLabel = estTomorrow.toLocaleString("default", { month: "long", year: "numeric" });
 
   useEffect(() => { if (adminUnlocked) loadAdminData(); }, [adminUnlocked]);
+
+  // Load all groups for the admin Groups manager (on demand)
+  useEffect(() => {
+    if (!adminUnlocked || section !== "groups" || adminGroups !== null) return;
+    (async () => {
+      try {
+        const { keys = [] } = await apiStorage.list("group:");
+        const results = await Promise.allSettled(keys.map(k => apiStorage.get(k)));
+        const gs = [];
+        keys.forEach((k, i) => { if (results[i].status === "fulfilled" && results[i].value) { try { gs.push(JSON.parse(results[i].value.value)); } catch (e) {} } });
+        gs.sort((a, b) => ((b.members || []).length) - ((a.members || []).length));
+        setAdminGroups(gs);
+      } catch (e) { setAdminGroups([]); }
+    })();
+  }, [adminUnlocked, section, adminGroups]);
+
+  // Admin: delete a group entirely — removes it from every member, and clears its
+  // leaderboards, daily group-submissions, and banter chat.
+  const deleteGroup = async (g) => {
+    if (!g) return;
+    setGroupBusy(true);
+    const code = g.code;
+    try {
+      for (const m of (g.members || [])) {
+        const cur = adminUsers[m];
+        if (cur && Array.isArray(cur.groups)) {
+          try { await mergeUser(m, { groups: cur.groups.filter(c => c !== code) }); } catch (e) {}
+        }
+      }
+      const subKeys = ((await apiStorage.list(`groupsub:${code}:`)).keys) || [];
+      const lbKeys = ((await apiStorage.list(`grouplb:${code}:`)).keys) || [];
+      await apiStorage.delete(`group:${code}`);
+      for (const k of [...subKeys, ...lbKeys, `groupchat:${code}`]) { try { await apiStorage.delete(k); } catch (e) {} }
+      setAdminGroups(prev => (prev || []).filter(x => x.code !== code));
+      setDelGroupCode(null);
+    } catch (e) {}
+    setGroupBusy(false);
+  };
 
   // ── Time-of-day engagement: fetch submissions:<date> for the selection and
   // bucket each answer's timestamp into 48 half-hour slots in Eastern time. ──
@@ -2702,7 +2743,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     <div>
       <div style={s.label}>Admin Panel</div>
       <div style={{ display: "flex", gap: 5, marginBottom: 22, flexWrap: "wrap" }}>
-        {[["analytics","📊 Analytics"],["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"]].map(([k, l]) => (
+        {[["analytics","📊 Analytics"],["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"],["groups","🗂 Groups"]].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)}
             style={{ padding: "7px 12px", borderRadius: 6,
               border: section === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`,
@@ -3603,6 +3644,35 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       )}
 
       {/* ── PREVIEW ──────────────────────────────────────────────────────── */}
+      {section === "groups" && (
+        <div>
+          <div style={{ color: TEXT_SEC, fontSize: "0.85rem", marginBottom: 16 }}>Manage all groups. Deleting a group removes it for every member and clears its leaderboard, banter, and history.</div>
+          {adminGroups === null ? (
+            <div style={{ ...s.mono, fontSize: "0.8rem", color: TEXT_MUTED }}>Loading…</div>
+          ) : adminGroups.length === 0 ? (
+            <div style={{ ...s.card, textAlign: "center", padding: "30px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No groups yet.</div></div>
+          ) : adminGroups.map(g => (
+            <div key={g.code} style={{ ...s.card, padding: "14px 16px", marginBottom: 8 }}>
+              <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: 10 }}>
+                <div style={{ minWidth: 0 }}>
+                  <div style={{ fontWeight: 600, fontSize: "0.92rem", color: OFF_WHITE }}>{g.name}</div>
+                  <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_MUTED, marginTop: 3 }}>Code {g.code} · {(g.members || []).length} member{(g.members || []).length !== 1 ? "s" : ""} · by {g.createdBy || "?"}</div>
+                </div>
+                {delGroupCode === g.code ? (
+                  <div style={{ display: "flex", gap: 6, flexShrink: 0 }}>
+                    <button disabled={groupBusy} onClick={() => deleteGroup(g)} style={{ background: "#E05C5C", color: "#fff", border: "none", borderRadius: 6, padding: "7px 12px", fontFamily: SANS, fontWeight: 600, fontSize: "0.74rem", cursor: "pointer" }}>{groupBusy ? "Deleting…" : "Confirm delete"}</button>
+                    <button disabled={groupBusy} onClick={() => setDelGroupCode(null)} style={{ ...s.btnSec, padding: "7px 12px", fontSize: "0.74rem" }}>Cancel</button>
+                  </div>
+                ) : (
+                  <button onClick={() => setDelGroupCode(g.code)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, color: "#E05C5C", borderRadius: 6, padding: "7px 12px", fontFamily: SANS, fontSize: "0.74rem", cursor: "pointer", flexShrink: 0 }}>Delete</button>
+                )}
+              </div>
+              {(g.members || []).length > 0 && <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_SEC, marginTop: 8, lineHeight: 1.5 }}>{(g.members || []).join(", ")}</div>}
+            </div>
+          ))}
+        </div>
+      )}
+
       {section === "preview" && (() => {
         const ptC = { 100: "#4CAF7D", 200: "#6495ED", 300: GOLD, 400: "#E05C5C" };
         const ptL = { 100: "Easy", 200: "Medium", 300: "Hard", 400: "Expert" };
