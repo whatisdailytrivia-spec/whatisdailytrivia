@@ -1003,6 +1003,9 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
               </div>
+              <div style={{ marginTop: 12, textAlign: "center", ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED }}>
+                See you tomorrow — fresh question at 6 AM ET.
+              </div>
             </div>
           );
         })()}
