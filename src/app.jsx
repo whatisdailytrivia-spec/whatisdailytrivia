@@ -1753,7 +1753,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         <div style={{ marginTop: 8, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
           {confirmLeave ? (
             <div style={{ background: "rgba(224,92,92,0.08)", border: "1px solid rgba(224,92,92,0.25)", borderRadius: 8, padding: "14px 16px" }}>
-              <div style={{ fontSize: "0.85rem", color: OFF_WHITE, marginBottom: 12 }}>Are you sure you want to leave <strong>{g.name}</strong>? Your scores will remain on the leaderboard but you'll stop competing here.</div>
+              <div style={{ fontSize: "0.85rem", color: OFF_WHITE, marginBottom: 12 }}>Are you sure you want to leave <strong>{g.name}</strong>? You'll be removed from this group's leaderboard. Your global score isn't affected, and you can rejoin anytime.</div>
               <div style={{ display: "flex", gap: 8 }}>
                 <button style={{ ...s.btn, background: "#E05C5C", flex: 1 }} onClick={leaveGroup}>Yes, leave group</button>
                 <button style={{ ...s.btnSec, flex: 1 }} onClick={() => setConfirmLeave(false)}>Cancel</button>
