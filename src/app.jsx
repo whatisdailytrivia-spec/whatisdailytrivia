@@ -613,6 +613,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [elapsed, setElapsed] = useState(0);
   const [history, setHistory] = useState(null);
   const [reveal, setReveal] = useState(null);   // today's answer, fetched once the user has submitted
+  const [revealFact, setRevealFact] = useState(null); // today's fun fact, shown after answering
   const [submitting, setSubmitting] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
   const [refOpen, setRefOpen] = useState(false);
@@ -664,11 +665,12 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   useEffect(() => {
     const sub = result || (user && submissions[user.username]);
     if (!user || !sub) { setReveal(null); return; }
+    if (sub.funFact) setRevealFact(sub.funFact);
     if (sub.displayAnswer) { setReveal(sub.displayAnswer); return; }
     let cancelled = false;
     fetch(`/api/reveal?username=${encodeURIComponent(user.username)}&date=${todayKey()}`)
       .then(r => r.json())
-      .then(d => { if (!cancelled && d && d.ok && d.displayAnswer) setReveal(d.displayAnswer); })
+      .then(d => { if (!cancelled && d && d.ok) { if (d.displayAnswer) setReveal(d.displayAnswer); if (d.funFact) setRevealFact(d.funFact); } })
       .catch(() => {});
     return () => { cancelled = true; };
   }, [user?.username, result, submissions]);
@@ -752,7 +754,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       setError("Couldn't submit — please try again.");
       return;
     }
-    const subWithReveal = { ...(resp.result || {}), displayAnswer: resp.displayAnswer };
+    const subWithReveal = { ...(resp.result || {}), displayAnswer: resp.displayAnswer, funFact: resp.funFact };
     setSubmissions(prev => ({ ...prev, [user.username]: subWithReveal }));
     localStorage.setItem(localKey, JSON.stringify(subWithReveal));
     const nu = { ...user, streak: resp.streak != null ? resp.streak : user.streak };
@@ -1057,6 +1059,12 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
               </div>
+              {(sub?.funFact || revealFact) && (
+                <div style={{ marginTop: 12, padding: "12px 16px", background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.28)", borderRadius: 8 }}>
+                  <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, letterSpacing: "0.08em", marginBottom: 6 }}>Fun Fact</div>
+                  <div style={{ fontSize: "0.95rem", color: TEXT_SEC, lineHeight: 1.5 }}>{sub?.funFact || revealFact}</div>
+                </div>
+              )}
               <div style={{ marginTop: 12, textAlign: "center", ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED }}>
                 See you tomorrow — fresh question at 6 AM ET.
               </div>

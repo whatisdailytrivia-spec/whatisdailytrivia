@@ -556,7 +556,7 @@ app.post("/api/grade", async (req, res) => {
     };
     await dbSet(`history:${username}`, JSON.stringify(history));
 
-    res.json({ ok: true, result: sub, displayAnswer: reveal, isFirstCorrect, streak, history });
+    res.json({ ok: true, result: sub, displayAnswer: reveal, funFact: q.funFact || null, isFirstCorrect, streak, history });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -572,7 +572,7 @@ app.get("/api/reveal", async (req, res) => {
     const qRaw = await dbGet(`question:${date}`);
     if (!qRaw) return res.json({ ok: false });
     const q = JSON.parse(qRaw);
-    res.json({ ok: true, displayAnswer: q.displayAnswer || q.answer });
+    res.json({ ok: true, displayAnswer: q.displayAnswer || q.answer, funFact: q.funFact || null });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
