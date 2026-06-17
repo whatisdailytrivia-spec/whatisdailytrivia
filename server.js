@@ -66,6 +66,27 @@ const getESTDate = () =>
 const getESTMonthKey = () => getESTDate().slice(0, 7);
 const etHour = () => parseInt(new Intl.DateTimeFormat("en-US", { timeZone: "America/New_York", hour: "2-digit", hour12: false }).format(new Date()), 10);
 
+// ET date minus one day (YYYY-MM-DD).
+const etYesterday = () => {
+  const d = new Date(getESTDate() + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+
+// Resolve which question-date a player is answering. Players west of ET finish
+// "their" day after midnight ET, so we honor a client-supplied date — but only:
+//   - today (ET), or
+//   - yesterday (ET) during the overnight window before the next 6am ET drop.
+// This makes per-player local-midnight deadlines work WITHOUT allowing anyone to
+// backfill older questions for points. Anything else collapses to today.
+const resolveQDate = (body) => {
+  const today = getESTDate();
+  const d = body && typeof body.date === "string" && /^\d{4}-\d{2}-\d{2}$/.test(body.date) ? body.date : today;
+  if (d === today) return today;
+  if (d === etYesterday() && etHour() < 6) return d;
+  return today;
+};
+
 // ─── Daily cron — 6:00 AM Eastern ────────────────────────────────────────────
 
 // Idempotent daily publish — shared by the in-process cron and the external
@@ -436,7 +457,7 @@ app.post("/api/start", async (req, res) => {
   try {
     const { username } = req.body;
     if (!username) return res.status(400).json({ error: "username required" });
-    const key = `start:${getESTDate()}:${username}`;
+    const key = `start:${resolveQDate(req.body)}:${username}`;
     await redis(["SET", key, String(Date.now()), "NX"]);
     const stored = await dbGet(key);
     res.json({ ok: true, startedAt: stored ? parseInt(stored, 10) : Date.now() });
@@ -448,7 +469,7 @@ app.post("/api/grade", async (req, res) => {
   try {
     const { username, guess } = req.body;
     if (!username) return res.status(400).json({ error: "username required" });
-    const date = getESTDate(), month = getESTMonthKey();
+    const date = resolveQDate(req.body), month = date.slice(0, 7);
 
     const qRaw = await dbGet(`question:${date}`);
     if (!qRaw) return res.json({ ok: false, error: "no_question" });
@@ -541,7 +562,7 @@ app.get("/api/reveal", async (req, res) => {
   try {
     const username = req.query.username;
     if (!username) return res.status(400).json({ error: "username required" });
-    const date = getESTDate();
+    const date = resolveQDate({ date: req.query.date });
     const subsRaw = await dbGet(`submissions:${date}`);
     const subs = subsRaw ? JSON.parse(subsRaw) : {};
     if (!subs[username]) return res.json({ ok: false });   // not answered → no reveal
