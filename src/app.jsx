@@ -2385,6 +2385,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [backingUp, setBackingUp] = useState(false);
   const [analyticsSeries, setAnalyticsSeries] = useState([]);   // durable daily rollups, oldest→newest
   const [analyticsRange, setAnalyticsRange]   = useState("All"); // 30D | 90D | All
+  const [anaTab, setAnaTab]     = useState("accounts"); // analytics sub-tab: accounts | engagement | performance | location
   const [perfCat, setPerfCat]   = useState("All"); // category filter for difficulty cross-tab
   const [perfDiff, setPerfDiff] = useState("All"); // difficulty filter for cross-tab
   const [acctView, setAcctView] = useState(false);     // show the New Accounts page
@@ -3005,15 +3006,24 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         return (
           <div>
             <div style={{ color: TEXT_SEC, fontSize: "0.85rem" }}>Across all {totalUsers} account{totalUsers !== 1 ? "s" : ""}.</div>
-            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 10, flexWrap: "wrap", gap: 8 }}>
-              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{mergedSeries.length} day{mergedSeries.length !== 1 ? "s" : ""} of history tracked · since {mergedSeries[0]?.date || today}</div>
-              <div style={{ display: "flex", gap: 4 }}>
-                {["30D", "90D", "All"].map(r => (
-                  <button key={r} onClick={() => setAnalyticsRange(r)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: analyticsRange === r ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: analyticsRange === r ? "rgba(201,168,76,0.12)" : "transparent", color: analyticsRange === r ? GOLD : TEXT_SEC }}>{r}</button>
-                ))}
-              </div>
+            {/* ── Analytics sub-tabs ── */}
+            <div style={{ display: "flex", gap: 6, flexWrap: "wrap", margin: "14px 0 4px" }}>
+              {[["accounts", "Account Creation"], ["engagement", "User Engagement"], ["performance", "User Performance"], ["location", "User Location"]].map(([k, l]) => (
+                <button key={k} onClick={() => setAnaTab(k)} style={{ padding: "7px 12px", borderRadius: 7, fontSize: "0.76rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: anaTab === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: anaTab === k ? "rgba(201,168,76,0.12)" : "transparent", color: anaTab === k ? GOLD : TEXT_SEC }}>{l}</button>
+              ))}
             </div>
+            {(anaTab === "accounts" || anaTab === "engagement") && (
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", marginTop: 6, flexWrap: "wrap", gap: 8 }}>
+                <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>{mergedSeries.length} day{mergedSeries.length !== 1 ? "s" : ""} of history tracked · since {mergedSeries[0]?.date || today}</div>
+                <div style={{ display: "flex", gap: 4 }}>
+                  {["30D", "90D", "All"].map(r => (
+                    <button key={r} onClick={() => setAnalyticsRange(r)} style={{ padding: "4px 10px", borderRadius: 6, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: analyticsRange === r ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`, background: analyticsRange === r ? "rgba(201,168,76,0.12)" : "transparent", color: analyticsRange === r ? GOLD : TEXT_SEC }}>{r}</button>
+                  ))}
+                </div>
+              </div>
+            )}
 
+            {anaTab === "accounts" && (<>
             {/* ===== USER ACCOUNT CREATION ===== */}
             {secHead("User Account Creation", "How fast the player base is growing",
               <button onClick={() => { setAcctRange("24h"); setAcctView(true); }} style={{ padding: "6px 12px", borderRadius: 6, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer", fontFamily: SANS, border: `1px solid ${GOLD}`, background: "rgba(201,168,76,0.12)", color: GOLD, whiteSpace: "nowrap", flexShrink: 0 }}>👥 New accounts →</button>
@@ -3067,6 +3077,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               );
             })()}
 
+            </>)}
+
+            {anaTab === "engagement" && (<>
             {/* ===== USER ENGAGEMENT ===== */}
             {secHead("User Engagement", "How many accounts play each day vs. the total")}
             {(() => {
@@ -3187,6 +3200,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
               );
             })()}
 
+            </>)}
+
+            {anaTab === "performance" && (<>
             {/* ===== USER PERFORMANCE ===== */}
             {secHead("User Performance", "How players do on the questions themselves")}
             {totalAnswers === 0 ? (
@@ -3287,6 +3303,41 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 </div>
               </div>
             )}
+            </>)}
+
+            {anaTab === "location" && (() => {
+              const STATE_NAMES = { AL:"Alabama",AK:"Alaska",AZ:"Arizona",AR:"Arkansas",CA:"California",CO:"Colorado",CT:"Connecticut",DE:"Delaware",FL:"Florida",GA:"Georgia",HI:"Hawaii",ID:"Idaho",IL:"Illinois",IN:"Indiana",IA:"Iowa",KS:"Kansas",KY:"Kentucky",LA:"Louisiana",ME:"Maine",MD:"Maryland",MA:"Massachusetts",MI:"Michigan",MN:"Minnesota",MS:"Mississippi",MO:"Missouri",MT:"Montana",NE:"Nebraska",NV:"Nevada",NH:"New Hampshire",NJ:"New Jersey",NM:"New Mexico",NY:"New York",NC:"North Carolina",ND:"North Dakota",OH:"Ohio",OK:"Oklahoma",OR:"Oregon",PA:"Pennsylvania",RI:"Rhode Island",SC:"South Carolina",SD:"South Dakota",TN:"Tennessee",TX:"Texas",UT:"Utah",VT:"Vermont",VA:"Virginia",WA:"Washington",WV:"West Virginia",WI:"Wisconsin",WY:"Wyoming",DC:"Washington DC" };
+              const counts = {};
+              users.forEach(u => { const st = (u.state || "").toUpperCase(); if (st) counts[st] = (counts[st] || 0) + 1; });
+              const rows = Object.entries(counts).map(([st, n]) => ({ st, n })).sort((a, b) => b.n - a.n);
+              const withState = rows.reduce((a, r) => a + r.n, 0);
+              const maxN = rows.length ? rows[0].n : 1;
+              const medals = { 0: "🥇", 1: "🥈", 2: "🥉" };
+              return (
+                <div>
+                  {secHead("User Location", "Where players are tuning in from, by state")}
+                  <div style={{ display: "grid", gridTemplateColumns: "repeat(3,1fr)", gap: 8 }}>
+                    <Stat v={withState} l="Players w/ state" gold />
+                    <Stat v={rows.length} l="States represented" />
+                    <Stat v={rows[0] ? rows[0].st : "—"} l="Top state" sub={rows[0] ? `${rows[0].n} player${rows[0].n !== 1 ? "s" : ""}` : ""} />
+                  </div>
+                  {rows.length === 0 ? (
+                    <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "16px 2px" }}>No state data yet — states are collected at signup.</div>
+                  ) : (
+                    <div style={{ ...panel, marginTop: 12 }}>
+                      {rows.map((r, i) => (
+                        <div key={r.st} style={{ display: "grid", gridTemplateColumns: "26px minmax(110px,1.1fr) 2fr 72px", alignItems: "center", gap: 10, marginBottom: 10 }}>
+                          <div style={{ ...s.mono, fontSize: "0.72rem", color: i < 3 ? GOLD : TEXT_MUTED, textAlign: "center" }}>{medals[i] || (i + 1)}</div>
+                          <div style={{ fontSize: "0.82rem", color: OFF_WHITE, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}><strong style={{ color: GOLD }}>{r.st}</strong> <span style={{ color: TEXT_MUTED, fontSize: "0.72rem" }}>{STATE_NAMES[r.st] || ""}</span></div>
+                          <div style={{ background: SURFACE2, borderRadius: 100, height: 10, overflow: "hidden" }}><div style={{ width: `${Math.max(4, Math.round((r.n / maxN) * 100))}%`, height: "100%", background: `linear-gradient(90deg, ${GOLD}, #E8C26B)`, borderRadius: 100 }} /></div>
+                          <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_SEC, textAlign: "right" }}>{r.n} · {Math.round((r.n / withState) * 100)}%</div>
+                        </div>
+                      ))}
+                    </div>
+                  )}
+                </div>
+              );
+            })()}
 
             <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 18, lineHeight: 1.6 }}>
               Account creation uses join dates. Engagement & category accuracy use cumulative play history; daily-active, response times and recent-question stats use per-account logs (~last 90 days).
