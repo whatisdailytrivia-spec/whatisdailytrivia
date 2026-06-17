@@ -327,6 +327,21 @@ export default function App() {
             }
           }
         }
+        // Cross-device sync: refresh the server-owned groups list on load, so a group
+        // created or joined on another device appears here without needing to re-login.
+        if (uR.status === "fulfilled" && uR.value) {
+          try {
+            const serverRec = JSON.parse(uR.value.value)[su.username];
+            if (serverRec && Array.isArray(serverRec.groups)) {
+              const cur = Array.isArray(su.groups) ? su.groups : [];
+              const same = cur.length === serverRec.groups.length && cur.every(c => serverRec.groups.includes(c));
+              if (!same) {
+                su = { ...su, groups: serverRec.groups };
+                localStorage.setItem("whatis_user", JSON.stringify(su));
+              }
+            }
+          } catch (e) {}
+        }
         setUser(su);
       }
     } catch (e) { setQuestion(SAMPLE); }
