@@ -647,6 +647,38 @@ app.get("/api/export", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// ---- Daily story image hosting (powers the IG-story email) ----
+// Upload (token-protected): the daily job pushes the PNG with curl, e.g.
+//   curl --data-binary @story.png -H "Content-Type: image/png" \
+//        -H "x-task-token: $TOKEN" https://<host>/api/story-image/2026-06-17
+// Stored as base64 in Redis (storyimg:<date>), auto-expiring after ~40 days.
+app.post("/api/story-image/:date", express.raw({ type: "*/*", limit: "12mb" }), async (req, res) => {
+  if (!checkTaskToken(req)) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const date = String(req.params.date || "").replace(/\.(png|jpe?g)$/i, "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(400).json({ error: "bad date" });
+    if (!req.body || !req.body.length) return res.status(400).json({ error: "no image data" });
+    const b64 = Buffer.from(req.body).toString("base64");
+    await redis(["SET", `storyimg:${date}`, b64, "EX", "3456000"]);
+    res.json({ ok: true, date, bytes: req.body.length, url: `/story/${date}.png` });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Public image serve — lets the stored story render inline in the email and be
+// saved on a phone. No auth (the image is meant to be public marketing).
+app.get("/story/:name", async (req, res) => {
+  try {
+    const date = String(req.params.name || "").replace(/\.(png|jpe?g)$/i, "");
+    if (!/^\d{4}-\d{2}-\d{2}$/.test(date)) return res.status(404).end();
+    const b64 = await dbGet(`storyimg:${date}`);
+    if (!b64) return res.status(404).end();
+    const buf = Buffer.from(b64, "base64");
+    res.set("Content-Type", "image/png");
+    res.set("Cache-Control", "public, max-age=86400");
+    res.send(buf);
+  } catch (e) { res.status(500).end(); }
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });
