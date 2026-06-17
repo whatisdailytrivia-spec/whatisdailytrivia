@@ -415,7 +415,10 @@ app.post("/api/append", async (req, res) => {
 
 const GRACE_PERIOD = 15, DECAY_RATE = 0.01, SCORE_FLOOR = 0.25;
 const calcMultiplier = (s) => Math.max(SCORE_FLOOR, 1 - Math.max(0, s - GRACE_PERIOD) * DECAY_RATE);
-const normalize = (s) => String(s || "").toLowerCase().replace(/-/g, " ").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim();
+// Normalize for answer matching: lowercase, strip punctuation, drop a leading
+// article ("the"/"a"/"an"), and singularize words so "Grammys" == "Grammy Awards".
+const stemWord = (w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
+const normalize = (s) => String(s || "").toLowerCase().replace(/-/g, " ").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim().replace(/^(the|a|an)\s+/, "").split(" ").map(stemWord).join(" ");
 const checkAnswer = (u, c, aliases = []) => {
   const un = normalize(u);
   if (!un) return false;
@@ -650,6 +653,87 @@ app.post("/api/publish", async (req, res) => {
   try {
     const force = req.query.force === "1" || (req.body && req.body.force === true);
     res.json(await publishDaily(force));
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Re-grade a day's submissions with the CURRENT answer-matching logic. Applies score
+// deltas only for submissions that flip incorrect -> correct, using the canonical
+// scoring (calcMultiplier + base points). Idempotent: each fixed submission is marked
+// .regraded so re-running never double-counts. Does NOT alter streaks or the daily
+// first-correct medal (those are order/date-dependent and left as originally recorded).
+// Token-protected (same x-task-token as /api/publish). Pass ?dry=1 to preview.
+app.post("/api/regrade/:date", async (req, res) => {
+  if (!checkTaskToken(req)) return res.status(403).json({ error: "Forbidden" });
+  try {
+    const date = req.params.date, month = date.slice(0, 7);
+    const dry = req.query.dry === "1";
+    const qRaw = await dbGet(`question:${date}`);
+    if (!qRaw) return res.json({ ok: false, error: "no_question" });
+    const q = JSON.parse(qRaw);
+    if (!q || !q.points) return res.json({ ok: false, error: "not_gradable" });
+    const cat = q.category || "Wildcard";
+    const subsRaw = await dbGet(`submissions:${date}`);
+    if (!subsRaw) return res.json({ ok: false, error: "no_submissions" });
+    const subs = JSON.parse(subsRaw);
+
+    const changed = [];
+    for (const [username, sub] of Object.entries(subs)) {
+      if (!sub || sub.regraded || sub.isCorrect) continue;
+      if (!checkAnswer(sub.answer || "", q.answer, q.aliases || [])) continue;
+      const excluded = isExcludedUser(username);
+      const speedMult = calcMultiplier(sub.responseTime || 0);
+      const pts = excluded ? 0 : Math.min(q.points, Math.round(q.points * speedMult));
+      changed.push({ username, pts, excluded, speedMult, sub });
+    }
+
+    if (dry) return res.json({ ok: true, dryRun: true, wouldChange: changed.map((c) => ({ user: c.username, answer: c.sub.answer, points: c.pts })) });
+    if (!changed.length) return res.json({ ok: true, changed: 0, note: "nothing to regrade" });
+
+    // 1) Flip the submissions and persist once.
+    for (const c of changed) { c.sub.isCorrect = true; c.sub.points = c.pts; c.sub.speedMult = Math.round(c.speedMult * 100); c.sub.regraded = true; }
+    await dbSet(`submissions:${date}`, JSON.stringify(subs));
+
+    // 2) Apply per-user deltas to leaderboard / history / group boards.
+    for (const c of changed) {
+      const username = c.username, pts = c.pts, excluded = c.excluded;
+      const usersRaw = await dbGet("users"); const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
+      const rec = usersObj[username] || {};
+
+      const lbRaw = await dbGet(`leaderboard:${month}`); const lb = lbRaw ? JSON.parse(lbRaw) : [];
+      const ex = lb.find((e) => e.username === username);
+      const entry = ex
+        ? { ...ex, points: excluded ? (ex.points || 0) : ((ex.points || 0) + pts), correct: (ex.correct || 0) + 1 }
+        : { username, displayName: rec.displayName || "", state: rec.state || "", points: excluded ? 0 : pts, correct: 1, streak: rec.streak || 0, answered: 1 };
+      await evalJson(ARR_UPSERT_LUA, `leaderboard:${month}`, [String(username), JSON.stringify(entry)]);
+
+      try {
+        const hRaw = await dbGet(`history:${username}`);
+        if (hRaw) {
+          const h = JSON.parse(hRaw);
+          h.totalCorrect = (h.totalCorrect || 0) + 1;
+          h.totalPoints = (h.totalPoints || 0) + pts;
+          const cs = (h.categoryStats && h.categoryStats[cat]) || { answered: 0, correct: 0 };
+          h.categoryStats = { ...(h.categoryStats || {}), [cat]: { answered: cs.answered, correct: cs.correct + 1 } };
+          if (Array.isArray(h.dailyLog)) h.dailyLog = h.dailyLog.map((d) => (d && d.date === date ? { ...d, correct: true, points: pts } : d));
+          await dbSet(`history:${username}`, JSON.stringify(h));
+        }
+      } catch (e) {}
+
+      const groups = Array.isArray(rec.groups) ? rec.groups : [];
+      for (const code of groups) {
+        try {
+          if (!excluded) await evalJson(ARR_APPEND_LUA, `groupsub:${code}:${date}`, [String(username)]);
+          const gRaw = await dbGet(`grouplb:${code}:${month}`); const glb = gRaw ? JSON.parse(gRaw) : [];
+          const gex = glb.find((e) => e.username === username);
+          const gentry = gex
+            ? { ...gex, points: excluded ? (gex.points || 0) : ((gex.points || 0) + pts), correct: (gex.correct || 0) + 1 }
+            : { username, state: rec.state || "", points: excluded ? 0 : pts, correct: 1, streak: rec.streak || 0, answered: 1 };
+          await evalJson(ARR_UPSERT_LUA, `grouplb:${code}:${month}`, [String(username), JSON.stringify(gentry)]);
+        } catch (e) {}
+      }
+    }
+
+    res.json({ ok: true, changed: changed.length, users: changed.map((c) => ({ user: c.username, points: c.pts })) });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 

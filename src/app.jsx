@@ -196,7 +196,8 @@ const localDateStr = () => new Intl.DateTimeFormat("en-CA", { year: "numeric", m
 const todayKey = () => localDateStr();
 const monthKey = () => localDateStr().slice(0, 7);
 const daysLeft = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate() - d.getDate(); };
-const normalize = (s) => s.toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim();
+const stemWord = (w) => (w.length > 3 && w.endsWith("s") ? w.slice(0,-1) : w);
+const normalize = (s) => String(s||"").toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim().replace(/^(the|a|an)\s+/,"").split(" ").map(stemWord).join(" ");
 const checkAnswer = (u, c, aliases = []) => {
   const un = normalize(u);
   const targets = [c, ...aliases].map(normalize);
