@@ -160,6 +160,7 @@ async function updateArchive(dateStr, q) {
     displayAnswer: q.displayAnswer || q.answer,
     category: q.category || "Wildcard",
     points: q.points || 200,
+    funFact: q.funFact || null,
   }));
   const idxRaw = await dbGet("archive_index");
   const idx    = idxRaw ? JSON.parse(idxRaw) : [];
