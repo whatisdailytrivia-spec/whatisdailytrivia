@@ -282,9 +282,42 @@ export default function App() {
   const [menuOpen, setMenuOpen] = useState(false);
   const [moreOpen, setMoreOpen] = useState(false);
   const [joinedNotice, setJoinedNotice] = useState(null);
+  const [updateReady, setUpdateReady] = useState(false);
+  const buildSig = useRef(null);
   const isMobile = useIsMobile();
 
   useEffect(() => { loadAll(); }, []);
+
+  // Detect when a newer app version has been deployed and offer a refresh. Never forced,
+  // so it can't interrupt someone mid-answer. Compares the built bundle signature
+  // (asset-manifest.json) captured at load against the current one every few minutes.
+  useEffect(() => {
+    const fetchSig = () => fetch("/asset-manifest.json", { cache: "no-store" })
+      .then(r => r.json()).then(m => (m && m.files && m.files["main.js"]) || null).catch(() => null);
+    fetchSig().then(sig => { buildSig.current = sig; });
+    const id = setInterval(async () => {
+      const sig = await fetchSig();
+      if (sig && buildSig.current && sig !== buildSig.current) setUpdateReady(true);
+    }, 180000);
+    return () => clearInterval(id);
+  }, []);
+
+  // Keep the Global Leaderboard live while it's open — standings move during the
+  // morning rush as others answer. Polls only while that tab is showing.
+  useEffect(() => {
+    if (tab !== "leaderboard") return;
+    const refresh = async () => {
+      try {
+        const [lR, sR] = await Promise.allSettled([
+          apiStorage.get(`leaderboard:${monthKey()}`), apiStorage.get(`submissions:${todayKey()}`),
+        ]);
+        if (lR.status === "fulfilled" && lR.value) setLeaderboard(JSON.parse(lR.value.value));
+        if (sR.status === "fulfilled" && sR.value) setSubmissions(JSON.parse(sR.value.value));
+      } catch (e) {}
+    };
+    const id = setInterval(refresh, 45000);
+    return () => clearInterval(id);
+  }, [tab]);
 
   const loadAll = async () => {
     setLoading(true);
@@ -327,16 +360,16 @@ export default function App() {
             }
           }
         }
-        // Cross-device sync: refresh the server-owned groups list on load, so a group
-        // created or joined on another device appears here without needing to re-login.
+        // Cross-device sync: the server profile is the source of truth, so refresh it on
+        // load. Picks up name / state / streak / groups changed on another device without
+        // a re-login. (Auth lives under cred:* and is never part of this record.)
         if (uR.status === "fulfilled" && uR.value) {
           try {
             const serverRec = JSON.parse(uR.value.value)[su.username];
-            if (serverRec && Array.isArray(serverRec.groups)) {
-              const cur = Array.isArray(su.groups) ? su.groups : [];
-              const same = cur.length === serverRec.groups.length && cur.every(c => serverRec.groups.includes(c));
-              if (!same) {
-                su = { ...su, groups: serverRec.groups };
+            if (serverRec && typeof serverRec === "object") {
+              const merged = { ...su, ...serverRec, username: su.username };
+              if (JSON.stringify(merged) !== JSON.stringify(su)) {
+                su = merged;
                 localStorage.setItem("whatis_user", JSON.stringify(su));
               }
             }
@@ -537,6 +570,12 @@ export default function App() {
       )}
 
       <div style={s.main}>
+        {updateReady && (
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "rgba(201,168,76,0.1)", border: "1px solid rgba(201,168,76,0.35)", borderRadius: 8, padding: "11px 14px", marginBottom: 16 }}>
+            <span style={{ fontSize: "0.85rem", color: GOLD }}>A new version of WhatIs… is available.</span>
+            <button onClick={() => window.location.reload()} style={{ background: GOLD, border: "none", color: "#1a1a1a", fontWeight: 700, fontSize: "0.8rem", padding: "7px 14px", borderRadius: 6, cursor: "pointer", whiteSpace: "nowrap" }}>Refresh</button>
+          </div>
+        )}
         {joinedNotice && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "rgba(76,175,125,0.1)", border: "1px solid rgba(76,175,125,0.35)", borderRadius: 8, padding: "11px 14px", marginBottom: 16 }}>
             <span style={{ fontSize: "0.85rem", color: "#4CAF7D" }}>✓ You've joined <strong style={{ color: OFF_WHITE }}>{joinedNotice}</strong>! Find it under Groups.</span>
