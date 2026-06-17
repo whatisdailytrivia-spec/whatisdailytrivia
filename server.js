@@ -260,7 +260,7 @@ const stripUserSecrets = (value) => {
 };
 // Remove the answer from a question/archive payload before it leaves the server.
 const stripAnswer = (value) => {
-  try { const o = JSON.parse(value); delete o.answer; delete o.displayAnswer; delete o.aliases; return JSON.stringify(o); }
+  try { const o = JSON.parse(value); delete o.answer; delete o.displayAnswer; delete o.aliases; delete o.funFact; return JSON.stringify(o); }
   catch (e) { return value; }
 };
 // Null out a legacy plaintext password at rest (atomic, scoped to one record).
