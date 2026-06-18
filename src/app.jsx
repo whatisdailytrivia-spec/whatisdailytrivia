@@ -188,6 +188,20 @@ const TODAY_MEDAL = {
   3: { emoji: "🥉", label: "Third today",  color: "#E0A878", bg: "rgba(205,127,50,0.14)",  border: "rgba(205,127,50,0.4)" },
 };
 
+// Today's participation stats over a set of usernames (pass null for ALL of today's
+// answerers). "Among those who played": the denominator is the real players who
+// answered today (host/excluded users don't count).
+const dailyStats = (subs, usernames) => {
+  if (!subs) return { played: 0, correct: 0, pctCorrect: null, avgScore: null };
+  let entries = Object.entries(subs).filter(([u, sb]) => sb && !isExcludedUser(u));
+  if (Array.isArray(usernames)) { const set = new Set(usernames); entries = entries.filter(([u]) => set.has(u)); }
+  const played = entries.length;
+  if (!played) return { played: 0, correct: 0, pctCorrect: null, avgScore: null };
+  const correct = entries.filter(([, sb]) => sb.isCorrect).length;
+  const totalPts = entries.reduce((a, [, sb]) => a + (Number(sb.points) || 0), 0);
+  return { played, correct, pctCorrect: Math.round((correct / played) * 100), avgScore: Math.round(totalPts / played) };
+};
+
 // Speed-based scoring
 const GRACE_PERIOD = 15;                     // seconds at full points
 const DECAY_RATE   = 0.01;                   // 1% per second lost after grace ends
@@ -1135,6 +1149,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       })()}
 
             <hr style={s.divider} />
+      <DailyAverages stats={dailyStats(submissions, null)} label="Today's averages — all players" />
       <div style={{ ...s.label, fontSize: "0.82rem", marginBottom: 5 }}>Top 5 this month</div>
       <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED, marginBottom: 12 }}>Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
       {(() => {
@@ -1158,6 +1173,34 @@ function LBHeader() {
       <div style={{ ...hStyle, gridColumn: "1 / 3", textAlign: "left", fontSize: "0.82rem" }}>Player</div>
       <div style={{ ...hStyle, textAlign: "right" }}>Today's Questions?</div>
       <div style={{ ...hStyle, textAlign: "right" }}>Monthly Score</div>
+    </div>
+  );
+}
+
+// Daily "Today's Averages" strip — % correct + average score among today's players.
+function DailyAverages({ stats, label }) {
+  const wrap = { ...s.card, padding: "12px 16px", marginBottom: 16 };
+  const lbl = { ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em" };
+  if (!stats || !stats.played) return (
+    <div style={wrap}>
+      <div style={lbl}>{label || "Today's averages"}</div>
+      <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED, marginTop: 6 }}>No one has answered yet today.</div>
+    </div>
+  );
+  const stat = (val, cap, color) => (
+    <div style={{ textAlign: "center" }}>
+      <div style={{ fontFamily: SERIF, fontSize: "1.35rem", fontWeight: 700, color, lineHeight: 1 }}>{val}</div>
+      <div style={{ ...s.mono, fontSize: "0.58rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.06em", marginTop: 3 }}>{cap}</div>
+    </div>
+  );
+  return (
+    <div style={{ ...wrap, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap" }}>
+      <div style={lbl}>{label || "Today's averages"}</div>
+      <div style={{ display: "flex", gap: 24 }}>
+        {stat(`${stats.pctCorrect}%`, "Got it correct", GOLD)}
+        {stat(stats.avgScore, "Avg score", OFF_WHITE)}
+        {stat(stats.played, "Played", TEXT_SEC)}
+      </div>
     </div>
   );
 }
@@ -1316,6 +1359,7 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
           <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", marginTop: 3 }}>Days left</div>
         </div>
       </div>
+      <DailyAverages stats={dailyStats(submissions, null)} label="Today's averages — all players" />
       {(() => {
         const { real, hosts } = orderBoard(leaderboard);
         const medalsToday = medalRanksFrom(submissions);
@@ -1867,6 +1911,8 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         )}
 
         <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 20 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
+
+        <DailyAverages stats={dailyStats(submissions, g.members)} label="Today's group averages" />
 
         {/* Leaderboard */}
         {(() => {
