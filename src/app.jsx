@@ -614,7 +614,7 @@ export default function App() {
         {shownTab === "winners"     && <WinnersTab />}
         {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} leaderboard={leaderboard} />}
         {shownTab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
-        {shownTab === "archive"     && <ArchiveTab />}
+        {shownTab === "archive"     && <ArchiveTab user={user} />}
         {shownTab === "rules"       && <RulesTab />}
         {shownTab === "contact"     && <ContactTab />}
         {shownTab === "admin"       && <AdminTab adminUnlocked={adminUnlocked} setAdminUnlocked={setAdminUnlocked} question={question} setQuestion={setQuestion} />}
@@ -1330,11 +1330,12 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
   );
 }
 
-function ArchiveTab() {
+function ArchiveTab({ user }) {
   const [entries, setEntries] = useState([]);
+  const [mySubs, setMySubs] = useState({});   // date -> this player's own submission
   const [loading, setLoading] = useState(true);
 
-  useEffect(() => { loadArchive(); }, []);
+  useEffect(() => { loadArchive(); }, [user?.username]);
 
   const loadArchive = async () => {
     setLoading(true);
@@ -1353,6 +1354,20 @@ function ArchiveTab() {
           .filter(Boolean)
           .sort((a, b) => b.date.localeCompare(a.date));
         setEntries(loaded);
+        // Load THIS player's own submission for each archived day (their answer + right/wrong).
+        if (user && user.username) {
+          const dates = loaded.map(e => e.date);
+          const subRes = await Promise.allSettled(dates.map(d => apiStorage.get(`submissions:${d}`)));
+          const mine = {};
+          subRes.forEach((res, i) => {
+            if (res.status === "fulfilled" && res.value) {
+              try { const all = JSON.parse(res.value.value); const sb = all && all[user.username]; if (sb) mine[dates[i]] = sb; } catch(e) {}
+            }
+          });
+          setMySubs(mine);
+        } else {
+          setMySubs({});
+        }
       }
     } catch (e) {}
     setLoading(false);
@@ -1417,6 +1432,19 @@ function ArchiveTab() {
             ) : (
               <div style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED, fontStyle: "italic" }}>Answer revealed tomorrow</div>
             )}
+            {user && (() => {
+              const mine = mySubs[e.date];
+              if (mine) {
+                const ok = mine.isCorrect;
+                return (
+                  <div style={{ marginTop: 10, display: "inline-flex", alignItems: "center", gap: 7, ...s.mono, fontSize: "0.68rem", color: ok ? "#4CAF7D" : "#E05C5C", background: ok ? "rgba(76,175,125,0.1)" : "rgba(224,92,92,0.1)", border: `1px solid ${ok ? "rgba(76,175,125,0.3)" : "rgba(224,92,92,0.3)"}`, borderRadius: 6, padding: "4px 10px" }}>
+                    <span>{ok ? "✓" : "✗"}</span>
+                    <span>Your answer: "{mine.answer || "—"}" · {ok ? "Correct" : "Incorrect"}{mine.points ? ` · ${mine.points} pts` : ""}</span>
+                  </div>
+                );
+              }
+              return reveal ? <div style={{ marginTop: 10, ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED }}>You didn't answer this one.</div> : null;
+            })()}
           </div>
         );
       })}
