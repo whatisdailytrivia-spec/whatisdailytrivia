@@ -169,13 +169,23 @@ const MEDAL = {
   bronze: { emoji: "🥉", label: "Third",  multiplier: 0.03 },
 };
 const getMedal = (pos) => pos === 0 ? "gold" : pos === 1 ? "silver" : pos === 2 ? "bronze" : null;
-// Today's first correct answerer (real players only), by earliest submission time. Resets daily.
-const firstCorrectFrom = (subs) => {
-  if (!subs) return null;
-  const correct = Object.entries(subs)
+// Today's 1st/2nd/3rd correct answerers (real players only), by earliest submission
+// time. Returns a map username -> place (1=first, 2=second, 3=third). Resets daily.
+const medalRanksFrom = (subs) => {
+  const out = {};
+  if (!subs) return out;
+  Object.entries(subs)
     .filter(([u, sb]) => sb && sb.isCorrect && !isExcludedUser(u))
-    .sort((a, b) => new Date(a[1].time || 0) - new Date(b[1].time || 0));
-  return correct.length ? correct[0][0] : null;
+    .sort((a, b) => new Date(a[1].time || 0) - new Date(b[1].time || 0))
+    .slice(0, 3)
+    .forEach(([u], i) => { out[u] = i + 1; });
+  return out;
+};
+// Visual style for the daily 1st/2nd/3rd-correct callout badges on the leaderboard.
+const TODAY_MEDAL = {
+  1: { emoji: "🥇", label: "First today",  color: "#FFD700", bg: "rgba(255,215,0,0.1)",   border: "rgba(255,215,0,0.3)" },
+  2: { emoji: "🥈", label: "Second today", color: "#CBD5E1", bg: "rgba(203,213,225,0.12)", border: "rgba(203,213,225,0.35)" },
+  3: { emoji: "🥉", label: "Third today",  color: "#E0A878", bg: "rgba(205,127,50,0.14)",  border: "rgba(205,127,50,0.4)" },
 };
 
 // Speed-based scoring
@@ -1128,12 +1138,12 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_MUTED, marginBottom: 12 }}>Leaderboard resets on the 1st of each month · {daysLeft()} days left</div>
       {(() => {
         const { real } = orderBoard(leaderboard);
-        const firstCorrectToday = firstCorrectFrom(submissions);
+        const medalsToday = medalRanksFrom(submissions);
         if (real.length === 0)
           return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "12px 0" }}>No scores yet — be the first to answer!</div>;
         return <>
           <LBHeader />
-          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {real.slice(0, 5).map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} medalToday={medalsToday[e.username] || null} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
     </div>
@@ -1151,7 +1161,7 @@ function LBHeader() {
   );
 }
 
-function LBRow({ entry, rank, isMe, host, todayStatus, firstToday }) {
+function LBRow({ entry, rank, isMe, host, todayStatus, medalToday }) {
   const medals = { 1: "🥇", 2: "🥈", 3: "🥉" };
   return (
     <div style={{ ...s.lbRow, border: `1px solid ${(!host && rank === 1) ? "rgba(201,168,76,0.4)" : isMe ? "rgba(201,168,76,0.25)" : SURFACE3}`, opacity: host ? 0.85 : 1 }}>
@@ -1162,7 +1172,7 @@ function LBRow({ entry, rank, isMe, host, todayStatus, firstToday }) {
           {entry.state && <span style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{entry.state}</span>}
           {host && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_SEC, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 100, padding: "1px 7px", letterSpacing: "0.08em" }}>HOST</span>}
           {isMe && <span style={{ color: GOLD, fontSize: "0.68rem" }}>(you)</span>}
-          {firstToday && !host && <span title="First correct today" style={{ ...s.mono, fontSize: "0.6rem", color: "#FFD700", background: "rgba(255,215,0,0.1)", border: "1px solid rgba(255,215,0,0.3)", borderRadius: 100, padding: "1px 7px", display: "inline-flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>🥇 First today</span>}
+          {medalToday && !host && (() => { const m = TODAY_MEDAL[medalToday]; return <span title={m.label.replace(" today", " correct today")} style={{ ...s.mono, fontSize: "0.6rem", color: m.color, background: m.bg, border: `1px solid ${m.border}`, borderRadius: 100, padding: "1px 7px", display: "inline-flex", alignItems: "center", gap: 3, whiteSpace: "nowrap" }}>{m.emoji} {m.label}</span>; })()}
         </div>
         <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>
           {host
@@ -1307,12 +1317,12 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
       </div>
       {(() => {
         const { real, hosts } = orderBoard(leaderboard);
-        const firstCorrectToday = firstCorrectFrom(submissions);
+        const medalsToday = medalRanksFrom(submissions);
         if (real.length === 0 && hosts.length === 0)
           return <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No scores yet.</div></div>;
         return <>
           <LBHeader />
-          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} firstToday={e.username === firstCorrectToday} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
+          {real.map((e, i) => <LBRow key={e.username} entry={e} rank={i + 1} isMe={e.username === user?.username} medalToday={medalsToday[e.username] || null} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
           {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user?.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
         </>;
       })()}
