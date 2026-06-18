@@ -73,6 +73,13 @@ const etYesterday = () => {
   return d.toISOString().slice(0, 10);
 };
 
+// Any YYYY-MM-DD minus one day (UTC noon avoids DST edges).
+const prevDay = (ds) => {
+  const d = new Date(ds + "T12:00:00Z");
+  d.setUTCDate(d.getUTCDate() - 1);
+  return d.toISOString().slice(0, 10);
+};
+
 // Resolve which question-date a player is answering. Players west of ET finish
 // "their" day after midnight ET, so we honor a client-supplied date — but only:
 //   - today (ET), or
@@ -506,16 +513,28 @@ app.post("/api/grade", async (req, res) => {
     const usersRaw = await dbGet("users");
     const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
     const rec = usersObj[username] || {};
-    const streak = correct ? ((rec.streak || 0) + 1) : 0;
-    await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ streak }), "merge"]);
+    // Streak = consecutive days answered CORRECTLY. It breaks if you answer wrong OR if
+    // you miss a day. `date` is this player's resolved question-day; the one-submission-
+    // per-day guard above means this runs at most once per player per day. A record with
+    // no lastPlayed yet (pre-rewrite account, incl. those seeded by
+    // migrateStreakLastPlayed) is grandfathered & extended on a correct day, never reset
+    // on deploy — so going live never wipes a streak that's currently alive.
+    const prevLast = rec.lastPlayed || null;
+    let streak;
+    if (!correct) streak = 0;                                                          // wrong answer breaks the streak
+    else if (prevLast === date) streak = rec.streak || 1;                              // already counted today (defensive)
+    else if (!prevLast || prevLast === prevDay(date)) streak = (rec.streak || 0) + 1;  // correct on a consecutive day / grandfathered
+    else streak = 1;                                                                   // correct, but a day was missed → fresh start
+    const lastPlayed = date;
+    await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ streak, lastPlayed }), "merge"]);
 
     // Global leaderboard (hosts tracked but scored 0)
     const lbRaw = await dbGet(`leaderboard:${month}`);
     const lb = lbRaw ? JSON.parse(lbRaw) : [];
     const exLb = lb.find((e) => e.username === username);
     const entry = exLb
-      ? { ...exLb, points: excluded ? 0 : (exLb.points + pts), correct: (exLb.correct || 0) + (correct ? 1 : 0), streak, answered: (exLb.answered || 0) + 1 }
-      : { username, displayName: rec.displayName || "", state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
+      ? { ...exLb, points: excluded ? 0 : (exLb.points + pts), correct: (exLb.correct || 0) + (correct ? 1 : 0), streak, lastPlayed, answered: (exLb.answered || 0) + 1 }
+      : { username, displayName: rec.displayName || "", state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, lastPlayed, answered: 1 };
     await evalJson(ARR_UPSERT_LUA, `leaderboard:${month}`, [String(username), JSON.stringify(entry)]);
 
     // Archive first-correct (informational)
@@ -532,8 +551,8 @@ app.post("/api/grade", async (req, res) => {
         const glb = gRaw ? JSON.parse(gRaw) : [];
         const gex = glb.find((e) => e.username === username);
         const gentry = gex
-          ? { ...gex, points: excluded ? 0 : (gex.points + pts), correct: (gex.correct || 0) + (correct ? 1 : 0), streak, answered: (gex.answered || 0) + 1 }
-          : { username, state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
+          ? { ...gex, points: excluded ? 0 : (gex.points + pts), correct: (gex.correct || 0) + (correct ? 1 : 0), streak, lastPlayed, answered: (gex.answered || 0) + 1 }
+          : { username, state: rec.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, lastPlayed, answered: 1 };
         await evalJson(ARR_UPSERT_LUA, `grouplb:${code}:${month}`, [String(username), JSON.stringify(gentry)]);
       } catch (e) {}
     }
@@ -557,7 +576,7 @@ app.post("/api/grade", async (req, res) => {
     };
     await dbSet(`history:${username}`, JSON.stringify(history));
 
-    res.json({ ok: true, result: sub, displayAnswer: reveal, funFact: q.funFact || null, isFirstCorrect, streak, history });
+    res.json({ ok: true, result: sub, displayAnswer: reveal, funFact: q.funFact || null, isFirstCorrect, streak, lastPlayed, history });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
@@ -789,9 +808,45 @@ app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });
 
+// ─── One-time migration: seed lastPlayed for existing streaks ────────────────
+// Before this rewrite, streaks had no lastPlayed field. We seed today's date for
+// everyone who currently has a live streak so that (a) nobody's streak is wiped on
+// deploy and (b) the new "missed a day = reset" rule only starts biting the day
+// AFTER deploy. Idempotent + gated by a flag key, so it runs at most once.
+async function migrateStreakLastPlayed() {
+  try {
+    if (await dbGet("streak_mig_v1")) return;
+    const migDate = getESTDate();
+    const usersRaw = await dbGet("users");
+    const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
+    let seededUsers = 0;
+    for (const [uname, rec] of Object.entries(usersObj)) {
+      if (rec && (rec.streak || 0) > 0 && !rec.lastPlayed) {
+        await evalJson(OBJ_MERGE_LUA, "users", [String(uname), JSON.stringify({ lastPlayed: migDate }), "merge"]);
+        seededUsers++;
+      }
+    }
+    // Current-month global leaderboard entries (group boards derive from this).
+    const lbKey = `leaderboard:${getESTMonthKey()}`;
+    const lbRaw = await dbGet(lbKey);
+    let seededLb = 0;
+    if (lbRaw) {
+      for (const e of JSON.parse(lbRaw)) {
+        if (e && (e.streak || 0) > 0 && !e.lastPlayed) {
+          await evalJson(ARR_UPSERT_LUA, lbKey, [String(e.username), JSON.stringify({ ...e, lastPlayed: migDate })]);
+          seededLb++;
+        }
+      }
+    }
+    await dbSet("streak_mig_v1", migDate);
+    console.log(`[MIGRATION streak_mig_v1] seeded lastPlayed=${migDate} (users:${seededUsers}, lb:${seededLb})`);
+  } catch (e) { console.error("[MIGRATION streak_mig_v1] failed:", e.message); }
+}
+
 const PORT = process.env.PORT || 3001;
 app.listen(PORT, () => {
   console.log(`WhatIs... server running on port ${PORT}`);
   console.log(`DB: ${UPSTASH_URL ? "Upstash Redis connected" : "NO DB CONFIGURED"}`);
   console.log(`Cron: daily 6am EST (publish + analytics) + monthly reset`);
+  migrateStreakLastPlayed();
 });

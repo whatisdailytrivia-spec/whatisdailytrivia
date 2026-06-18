@@ -195,6 +195,18 @@ const etDateStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Ne
 const localDateStr = () => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const todayKey = () => localDateStr();
 const monthKey = () => localDateStr().slice(0, 7);
+// Local YYYY-MM-DD minus one day.
+const prevDayKey = (k) => { const [y, m, d] = k.split("-").map(Number); const dt = new Date(y, m - 1, d - 1); const p = (n) => String(n).padStart(2, "0"); return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`; };
+// A streak is "live" only while the player answered today or yesterday (local).
+// Missing a full day kills it (returns 0 → callers hide the fire emoji entirely).
+// Records with no lastPlayed (pre-rewrite accounts) are grandfathered as live, so
+// the rollout never blanks a streak that's already showing.
+const liveStreakOf = (streak, lastPlayed) => {
+  const s = Number(streak) || 0;
+  if (s <= 0) return 0;
+  if (!lastPlayed) return s;
+  return lastPlayed >= prevDayKey(todayKey()) ? s : 0;
+};
 const daysLeft = () => { const d = new Date(); return new Date(d.getFullYear(), d.getMonth()+1, 0).getDate() - d.getDate(); };
 const stemWord = (w) => (w.length > 3 && w.endsWith("s") ? w.slice(0,-1) : w);
 const normalize = (s) => String(s||"").toLowerCase().replace(/-/g," ").replace(/[^a-z0-9\s]/g,"").replace(/\s+/g," ").trim().replace(/^(the|a|an)\s+/,"").split(" ").map(stemWord).join(" ");
@@ -468,7 +480,7 @@ export default function App() {
         </div>
         {isMobile ? (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {user && <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {user.streak || 0}</div>}
+            {user && liveStreakOf(user.streak, user.lastPlayed) > 0 && <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {liveStreakOf(user.streak, user.lastPlayed)}</div>}
             <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "7px 10px", cursor: "pointer", color: OFF_WHITE, fontSize: "1rem", lineHeight: 1 }}>
               {menuOpen ? "✕" : "☰"}
             </button>
@@ -545,7 +557,7 @@ export default function App() {
 
             {user && (
               <div style={{ display: "flex", alignItems: "center", gap: 8, flexShrink: 0 }}>
-                <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {user.streak || 0}</div>
+                {liveStreakOf(user.streak, user.lastPlayed) > 0 && <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {liveStreakOf(user.streak, user.lastPlayed)}</div>}
                 <button style={{ ...s.btnSec, padding: "5px 10px", fontSize: "0.72rem" }} onClick={() => { setUser(null); localStorage.removeItem("whatis_user"); }}>Sign out</button>
               </div>
             )}
@@ -757,7 +769,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     const subWithReveal = { ...(resp.result || {}), displayAnswer: resp.displayAnswer, funFact: resp.funFact };
     setSubmissions(prev => ({ ...prev, [user.username]: subWithReveal }));
     localStorage.setItem(localKey, JSON.stringify(subWithReveal));
-    const nu = { ...user, streak: resp.streak != null ? resp.streak : user.streak };
+    const nu = { ...user, streak: resp.streak != null ? resp.streak : user.streak, lastPlayed: resp.lastPlayed != null ? resp.lastPlayed : user.lastPlayed };
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     if (resp.history) setHistory(resp.history);
     setResult(subWithReveal);
@@ -792,14 +804,23 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     // Save to localStorage immediately — this is the primary guard on return visits
     localStorage.setItem(`sub:${todayKey()}:${user.username}`, JSON.stringify(sub));
     await setObjField(`submissions:${todayKey()}`, user.username, sub);
-    const streak = correct ? (user.streak || 0) + 1 : 0;
-    const nu = { ...user, streak };
+    // Streak = consecutive days answered correctly. Mirrors the server rule: wrong answer
+    // breaks it, missing a day breaks it. A record with no lastPlayed yet is grandfathered
+    // & extended on a correct day, never wiped.
+    const playDay = todayKey();
+    const streak = !correct
+      ? 0
+      : user.lastPlayed === playDay
+        ? (user.streak || 0)
+        : (!user.lastPlayed || user.lastPlayed === prevDayKey(playDay)) ? (user.streak || 0) + 1 : 1;
+    const lastPlayed = playDay;
+    const nu = { ...user, streak, lastPlayed };
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
-    await saveUser(user.username, { streak });
+    await saveUser(user.username, { streak, lastPlayed });
     const ex = leaderboard.find(e => e.username === user.username);
     const entry = ex
-      ? { ...ex, points: excluded ? 0 : ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, answered: ex.answered + 1 }
-      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, answered: 1 };
+      ? { ...ex, points: excluded ? 0 : ex.points + pts, correct: ex.correct + (correct ? 1 : 0), streak, lastPlayed, answered: ex.answered + 1 }
+      : { username: user.username, displayName: user.displayName || "", state: user.state || "", points: excluded ? 0 : pts, correct: correct ? 1 : 0, streak, lastPlayed, answered: 1 };
     await saveLBEntry(entry);
 
     // Update archive with the first correct answerer (informational only)
@@ -1146,7 +1167,7 @@ function LBRow({ entry, rank, isMe, host, todayStatus, firstToday }) {
         <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 2 }}>
           {host
             ? `${entry.correct || 0}/${entry.answered || 0} correct`
-            : `🔥${entry.streak || 0} · ${entry.correct || 0}/${entry.answered || 0} correct`}
+            : `${liveStreakOf(entry.streak, entry.lastPlayed) > 0 ? `🔥${liveStreakOf(entry.streak, entry.lastPlayed)} · ` : ""}${entry.correct || 0}/${entry.answered || 0} correct`}
         </div>
       </div>
       <div style={{ display: "flex", justifyContent: "flex-end", alignItems: "center" }}>
@@ -1238,7 +1259,7 @@ function WinnersTab() {
                       {entry.state && <span style={{ ...s.mono, fontSize: "0.63rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px", marginLeft: 7, fontWeight: 400 }}>{entry.state}</span>}
                     </div>
                     <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>
-                      🔥{entry.streak || 0} · {entry.correct || 0}/{entry.answered || 0} correct
+                      {liveStreakOf(entry.streak, entry.lastPlayed) > 0 && `🔥${liveStreakOf(entry.streak, entry.lastPlayed)} · `}{entry.correct || 0}/{entry.answered || 0} correct
                     </div>
                   </div>
                   <div style={{ ...s.mono, fontSize: "0.9rem", fontWeight: 700, color: rank === 1 ? color : TEXT_SEC }}>
