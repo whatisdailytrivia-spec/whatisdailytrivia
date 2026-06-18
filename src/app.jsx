@@ -751,8 +751,19 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
       if (Object.values(users || {}).some(u => u && (u.email || "").trim().toLowerCase() === email)) return setError("An account with this email already exists.");
-      const referredBy = (() => { try { const r = localStorage.getItem("whatis_ref"); return (r && r.toLowerCase() !== form.username.toLowerCase()) ? r : ""; } catch (e) { return ""; } })();
-      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy };
+      // Attribute a signup that arrived from a shared link — either a refer-a-friend
+      // link (?ref=) or a group invite link (?join=…&by=). referralSource notes which.
+      const { referredBy, referralSource } = (() => {
+        const norm = (v) => (v && String(v).toLowerCase() !== form.username.toLowerCase()) ? v : "";
+        try {
+          const ref = norm(localStorage.getItem("whatis_ref"));
+          if (ref) return { referredBy: ref, referralSource: "friend" };
+          const joinBy = norm(localStorage.getItem("whatis_join_by"));
+          if (localStorage.getItem("whatis_join") && joinBy) return { referredBy: joinBy, referralSource: "group" };
+        } catch (e) {}
+        return { referredBy: "", referralSource: "" };
+      })();
+      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy, referralSource };
       let res;
       try {
         res = await atomicPost("/api/register", { username: form.username, password: form.password, profile });
@@ -2627,9 +2638,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
 
   useEffect(() => { if (adminUnlocked) loadAdminData(); }, [adminUnlocked]);
 
-  // Load all groups for the admin (Groups manager + the Group invites & joins audit).
+  // Load all groups for the admin Groups manager (on demand)
   useEffect(() => {
-    if (!adminUnlocked || adminGroups !== null) return;
+    if (!adminUnlocked || section !== "groups" || adminGroups !== null) return;
     (async () => {
       try {
         const { keys = [] } = await apiStorage.list("group:");
@@ -2640,7 +2651,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         setAdminGroups(gs);
       } catch (e) { setAdminGroups([]); }
     })();
-  }, [adminUnlocked, adminGroups]);
+  }, [adminUnlocked, section, adminGroups]);
 
   // Admin: delete a group entirely — removes it from every member, and clears its
   // leaderboards, daily group-submissions, and banter chat.
@@ -3237,7 +3248,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             <Trend title="Total accounts · full history" color={GOLD} accessor={p => p.totalAccounts || 0} unit="" yLabel="Accounts" last={`${totalUsers} total`} />
 
             {/* ===== REFERRALS ===== */}
-            {secHead("Referrals", "Accounts created from shared referral links")}
+            {secHead("Referrals", "Accounts created from a shared link — refer-a-friend or group invite")}
             {(() => {
               const referred = users.filter(u => u && u.referredBy);
               const byRef = {};
@@ -3262,8 +3273,13 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                             <div style={{ fontWeight: 600, fontSize: "0.86rem", color: OFF_WHITE, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{r}</div>
                             <div style={{ ...s.mono, fontSize: "0.72rem", color: GOLD, flexShrink: 0 }}>{list.length} joined</div>
                           </div>
-                          <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC, marginTop: 5, lineHeight: 1.5 }}>
-                            {list.map(u => u.displayName || u.username).join(", ")}
+                          <div style={{ marginTop: 6 }}>
+                            {list.map(u => (
+                              <div key={u.username} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", ...s.mono, fontSize: "0.68rem" }}>
+                                <span style={{ color: TEXT_SEC, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.displayName || u.username}</span>
+                                <span style={{ color: u.referralSource === "group" ? "#6495ED" : GOLD, flexShrink: 0 }}>{u.referralSource === "group" ? "group link" : "refer-a-friend"}</span>
+                              </div>
+                            ))}
                           </div>
                         </div>
                       ))}
@@ -3272,42 +3288,6 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 </>
               );
             })()}
-
-            {/* ===== GROUP INVITES & JOINS (admin only) ===== */}
-            {secHead("Group invites & joins", "How each member joined each group — admin only, not shown to players")}
-            {adminGroups === null ? (
-              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "8px 2px" }}>Loading groups…</div>
-            ) : adminGroups.length === 0 ? (
-              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "8px 2px" }}>No groups yet.</div>
-            ) : (
-              <div style={{ marginTop: 10 }}>
-                {adminGroups.map(g => {
-                  const jm = g.joinMeta || {};
-                  const members = g.members || [];
-                  const viaLink = members.filter(m => jm[m] && jm[m].method === "link").length;
-                  const viaCode = members.filter(m => jm[m] && jm[m].method === "code").length;
-                  return (
-                    <div key={g.code} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "11px 14px", marginBottom: 8 }}>
-                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
-                        <div style={{ fontWeight: 600, fontSize: "0.85rem", color: OFF_WHITE }}>{g.name} <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED }}>· {g.code}</span></div>
-                        <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, flexShrink: 0 }}>{members.length} members · {viaLink} link · {viaCode} code</div>
-                      </div>
-                      {members.map(m => {
-                        const meta = jm[m];
-                        const label = meta ? ({ founder: "Founder", code: "Entered code", link: "Invite link" }[meta.method] || meta.method) : "Before tracking";
-                        const when = meta && meta.at ? new Date(meta.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
-                        return (
-                          <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "5px 0", borderTop: `1px solid ${SURFACE2}` }}>
-                            <span style={{ fontSize: "0.8rem", color: TEXT_SEC }}>{m}</span>
-                            <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textAlign: "right" }}>{label}{meta && meta.by ? ` · by ${meta.by}` : ""}{when ? ` · ${when}` : ""}</span>
-                          </div>
-                        );
-                      })}
-                    </div>
-                  );
-                })}
-              </div>
-            )}
 
             </>)}
 
