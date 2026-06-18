@@ -720,6 +720,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       const email = form.email.trim().toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
+      if (Object.values(users || {}).some(u => u && (u.email || "").trim().toLowerCase() === email)) return setError("An account with this email already exists.");
       const referredBy = (() => { try { const r = localStorage.getItem("whatis_ref"); return (r && r.toLowerCase() !== form.username.toLowerCase()) ? r : ""; } catch (e) { return ""; } })();
       const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy };
       let res;
@@ -730,7 +731,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const legacy = await registerUser(form.username, { ...profile, password: form.password });
         res = legacy.ok ? { ok: true, user: { ...profile, password: form.password } } : { ok: false, taken: true };
       }
-      if (!res.ok) return setError("Username taken.");
+      if (!res.ok) return setError(res.emailTaken ? "An account with this email already exists." : "Username taken.");
       const u = res.user || profile;
       setUser(u); localStorage.setItem("whatis_user", JSON.stringify(u));
       setUsers(prev => ({ ...prev, [form.username]: u }));

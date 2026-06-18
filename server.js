@@ -383,6 +383,27 @@ redis.call('SET', KEYS[1], cjson.encode(arr))
 return cjson.encode({ ok = true })
 `;
 
+// Atomic registration: claim the username AND guarantee the email isn't already in
+// use (case-insensitive), in a single read-modify-write so two simultaneous signups
+// can't both slip through. ARGV: [username, profileJSON, normalizedEmail].
+const REGISTER_LUA = `
+local cur = redis.call('GET', KEYS[1])
+local obj = {}
+if cur and #cur > 0 then obj = cjson.decode(cur) end
+if obj[ARGV[1]] ~= nil then return cjson.encode({ ok = false, taken = true }) end
+local email = ARGV[3]
+if email ~= nil and #email > 0 then
+  for uname, rec in pairs(obj) do
+    if type(rec) == 'table' and rec.email ~= nil and string.lower(rec.email) == email then
+      return cjson.encode({ ok = false, emailTaken = true })
+    end
+  end
+end
+obj[ARGV[1]] = cjson.decode(ARGV[2])
+redis.call('SET', KEYS[1], cjson.encode(obj))
+return cjson.encode({ ok = true })
+`;
+
 const evalJson = async (script, key, args) => {
   const result = await redis(["EVAL", script, "1", key, ...args]);
   try { return JSON.parse(result); } catch (e) { return { ok: true }; }
@@ -603,10 +624,13 @@ app.post("/api/register", async (req, res) => {
   try {
     const { username, password, profile } = req.body;
     if (!username || !password || !profile) return res.status(400).json({ error: "username, password, profile required" });
-    const claim = await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify(profile), "setnx"]);
+    const email = String(profile.email || "").trim().toLowerCase();
+    const profileNorm = { ...profile, email };
+    const claim = await evalJson(REGISTER_LUA, "users", [String(username), JSON.stringify(profileNorm), email]);
     if (claim && claim.taken) return res.json({ ok: false, taken: true });
-    await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(password), email: profile.email || "" }));
-    res.json({ ok: true, user: profile });
+    if (claim && claim.emailTaken) return res.json({ ok: false, emailTaken: true });
+    await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(password), email }));
+    res.json({ ok: true, user: profileNorm });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
