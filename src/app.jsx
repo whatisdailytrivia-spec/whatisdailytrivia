@@ -138,6 +138,18 @@ const appendUnique = async (key, value) => {
 const mutateGroupMembers = (key, fn) =>
   mergeWrite(key, (g) => (g ? { ...g, members: fn(Array.isArray(g.members) ? g.members : []) } : g), null);
 
+// Add a member AND record how they joined (audit): meta = { method: "founder"|"code"|"link",
+// by: <inviter username|undefined>, at: <ms> }. Never overwrites an existing record, so re-joins
+// and members who joined before tracking keep their original (or empty) entry.
+const recordGroupJoin = (key, username, meta) =>
+  mergeWrite(key, (g) => {
+    if (!g) return g;
+    const members = Array.isArray(g.members) ? g.members : [];
+    const joinMeta = { ...(g.joinMeta || {}) };
+    if (!joinMeta[username]) joinMeta[username] = { at: Date.now(), ...meta };
+    return { ...g, members: members.includes(username) ? members : [...members, username], joinMeta };
+  }, null);
+
 const ADMIN_PASSWORD = "whatis2026";
 
 // Accounts that play daily but never appear on or affect any leaderboard
@@ -365,6 +377,8 @@ export default function App() {
       if (refParam) localStorage.setItem("whatis_ref", refParam);
       const joinParam = params.get("join");
       if (joinParam) localStorage.setItem("whatis_join", joinParam);
+      const byParam = params.get("by");
+      if (byParam) localStorage.setItem("whatis_join_by", byParam);
     } catch (e) {}
     // Clean up stale submission entries from previous days
     const today = todayKey();
@@ -440,14 +454,14 @@ export default function App() {
   };
 
   // Add a user to a group by invite code. Used by the ?join= auto-join below.
-  const joinGroupByCode = async (username, rawCode) => {
+  const joinGroupByCode = async (username, rawCode, meta = { method: "link" }) => {
     const code = String(rawCode || "").toUpperCase().trim();
     if (!username || !code) return { ok: false };
     try {
       const r = await apiStorage.get(`group:${code}`).catch(() => null);
       if (!r) return { ok: false, error: "not_found" };
       const g = JSON.parse(r.value);
-      await mutateGroupMembers(`group:${code}`, (m) => (m.includes(username) ? m : [...m, username]));
+      await recordGroupJoin(`group:${code}`, username, meta);
       const cur = users[username] || user || {};
       const updatedGroups = Array.isArray(cur.groups)
         ? (cur.groups.includes(code) ? cur.groups : [...cur.groups, code])
@@ -477,9 +491,11 @@ export default function App() {
     let pending = null;
     try { pending = localStorage.getItem("whatis_join"); } catch (e) {}
     if (!pending) return;
+    let by = null;
+    try { by = localStorage.getItem("whatis_join_by") || null; } catch (e) {}
     (async () => {
-      const res = await joinGroupByCode(user.username, pending);
-      try { localStorage.removeItem("whatis_join"); } catch (e) {}
+      const res = await joinGroupByCode(user.username, pending, { method: "link", by });
+      try { localStorage.removeItem("whatis_join"); localStorage.removeItem("whatis_join_by"); } catch (e) {}
       if (res && res.ok) setJoinedNotice(res.name || "your group");
     })();
   }, [user?.username]);
@@ -1753,7 +1769,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     if (createName.length > 30) return setCreateError("Max 30 characters.");
     setCreating(true);
     const code = genCode();
-    const group = { code, name: createName.trim(), createdBy: user.username, created: todayKey(), members: [user.username] };
+    const group = { code, name: createName.trim(), createdBy: user.username, created: todayKey(), members: [user.username], joinMeta: { [user.username]: { method: "founder", at: Date.now() } } };
     await apiStorage.set(`group:${code}`, JSON.stringify(group));
     const updatedGroups = [...(user.groups || []), code];
     const nu = { ...user, groups: updatedGroups };
@@ -1774,7 +1790,10 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
       const r = await apiStorage.get(`group:${code}`);
       if (!r) return setJoinError("Group not found. Check the code and try again.");
       const group = JSON.parse(r.value);
-      if (!group.members.includes(user.username)) { group.members.push(user.username); await mutateGroupMembers(`group:${code}`, (m) => m.includes(user.username) ? m : [...m, user.username]); }
+      const joinMeta = { method: "code", at: Date.now() };
+      if (!group.members.includes(user.username)) group.members.push(user.username);
+      group.joinMeta = { ...(group.joinMeta || {}), [user.username]: (group.joinMeta || {})[user.username] || joinMeta };
+      await recordGroupJoin(`group:${code}`, user.username, joinMeta);
       const updatedGroups = [...(user.groups || []), code];
       const nu = { ...user, groups: updatedGroups };
       await saveUser(user.username, { groups: updatedGroups });
@@ -1867,7 +1886,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
                     <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Invite to group — share the link</div>
                     <div style={{ ...s.mono, fontSize: "0.7rem", color: GOLD, letterSpacing: "0.16em", textAlign: "center", marginBottom: 11 }}>Code: {g.code}</div>
                     {(() => {
-                      const joinLink = `${window.location.origin}/?join=${g.code}`;
+                      const joinLink = `${window.location.origin}/?join=${g.code}&by=${encodeURIComponent(user.username)}`;
                       const joinMsg = `Join our group on WhatIs... Daily Trivia -\n\nOne Question.\nEvery Morning.\nMonthly Prizes.\n\n${joinLink}`;
                       const ib = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "9px 6px", borderRadius: 7, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.74rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
                       return (
@@ -2608,9 +2627,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
 
   useEffect(() => { if (adminUnlocked) loadAdminData(); }, [adminUnlocked]);
 
-  // Load all groups for the admin Groups manager (on demand)
+  // Load all groups for the admin (Groups manager + the Group invites & joins audit).
   useEffect(() => {
-    if (!adminUnlocked || section !== "groups" || adminGroups !== null) return;
+    if (!adminUnlocked || adminGroups !== null) return;
     (async () => {
       try {
         const { keys = [] } = await apiStorage.list("group:");
@@ -2621,7 +2640,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         setAdminGroups(gs);
       } catch (e) { setAdminGroups([]); }
     })();
-  }, [adminUnlocked, section, adminGroups]);
+  }, [adminUnlocked, adminGroups]);
 
   // Admin: delete a group entirely — removes it from every member, and clears its
   // leaderboards, daily group-submissions, and banter chat.
@@ -3253,6 +3272,42 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 </>
               );
             })()}
+
+            {/* ===== GROUP INVITES & JOINS (admin only) ===== */}
+            {secHead("Group invites & joins", "How each member joined each group — admin only, not shown to players")}
+            {adminGroups === null ? (
+              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "8px 2px" }}>Loading groups…</div>
+            ) : adminGroups.length === 0 ? (
+              <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "8px 2px" }}>No groups yet.</div>
+            ) : (
+              <div style={{ marginTop: 10 }}>
+                {adminGroups.map(g => {
+                  const jm = g.joinMeta || {};
+                  const members = g.members || [];
+                  const viaLink = members.filter(m => jm[m] && jm[m].method === "link").length;
+                  const viaCode = members.filter(m => jm[m] && jm[m].method === "code").length;
+                  return (
+                    <div key={g.code} style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "11px 14px", marginBottom: 8 }}>
+                      <div style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, marginBottom: 6 }}>
+                        <div style={{ fontWeight: 600, fontSize: "0.85rem", color: OFF_WHITE }}>{g.name} <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED }}>· {g.code}</span></div>
+                        <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, flexShrink: 0 }}>{members.length} members · {viaLink} link · {viaCode} code</div>
+                      </div>
+                      {members.map(m => {
+                        const meta = jm[m];
+                        const label = meta ? ({ founder: "Founder", code: "Entered code", link: "Invite link" }[meta.method] || meta.method) : "Before tracking";
+                        const when = meta && meta.at ? new Date(meta.at).toLocaleDateString("en-US", { month: "short", day: "numeric" }) : "";
+                        return (
+                          <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "5px 0", borderTop: `1px solid ${SURFACE2}` }}>
+                            <span style={{ fontSize: "0.8rem", color: TEXT_SEC }}>{m}</span>
+                            <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, textAlign: "right" }}>{label}{meta && meta.by ? ` · by ${meta.by}` : ""}{when ? ` · ${when}` : ""}</span>
+                          </div>
+                        );
+                      })}
+                    </div>
+                  );
+                })}
+              </div>
+            )}
 
             </>)}
 
