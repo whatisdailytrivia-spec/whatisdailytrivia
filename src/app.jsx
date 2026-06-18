@@ -1726,6 +1726,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
+  const [groupTab, setGroupTab] = useState("board"); // group detail sub-tab: board | manage
 
   // Poll the active group's chat for unread messages (badge on the Group Banter button).
   useEffect(() => {
@@ -1850,7 +1851,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     return (
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 20 }}>
-          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); setWinnersOpen(false); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); setWinnersOpen(false); setGroupTab("board"); setConfirmRemove(null); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {/* Banter */}
             <button onClick={() => setBanterOpen(true)} title="Group Banter" style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${banterUnread > 0 ? "rgba(224,92,92,0.55)" : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -1892,7 +1893,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
             </div>
           </div>
         </div>
-        <div style={s.label}>Group leaderboard</div>
+        <div style={s.label}>{isCreator && groupTab === "manage" ? "Manage members" : "Group leaderboard"}</div>
 
         {/* Group name + rename */}
         {renaming ? (
@@ -1920,6 +1921,15 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
 
         <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 20 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
 
+        {isCreator && (
+          <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
+            {[["board", "Leaderboard"], ["manage", "Manage members"]].map(([k, label]) => (
+              <button key={k} onClick={() => { setGroupTab(k); setConfirmRemove(null); }} style={{ flex: 1, padding: "9px 12px", borderRadius: 8, border: `1px solid ${groupTab === k ? GOLD : SURFACE3}`, background: groupTab === k ? "rgba(201,168,76,0.12)" : SURFACE2, color: groupTab === k ? GOLD : TEXT_SEC, fontFamily: SANS, fontWeight: 600, fontSize: "0.8rem", cursor: "pointer" }}>{label}</button>
+            ))}
+          </div>
+        )}
+
+        {(!isCreator || groupTab === "board") && (<>
         <DailyAverages stats={dailyStats(submissions, g.members)} label="Today's group averages" />
 
         {/* Leaderboard */}
@@ -1933,14 +1943,17 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
             {hosts.map(e => <LBRow key={e.username} entry={e} host isMe={e.username === user.username} todayStatus={submissions && submissions[e.username] ? (submissions[e.username].isCorrect ? "correct" : "wrong") : null} />)}
           </>;
         })()}
+        </>)}
 
-        {/* Manage members (founder only) */}
-        {isCreator && g.members.filter(m => m !== user.username).length > 0 && (
-          <div style={{ marginTop: 18 }}>
-            <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Manage members · founder only</div>
-            {g.members.filter(m => m !== user.username).map(m => (
-              <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${SURFACE2}` }}>
-                <span style={{ fontSize: "0.84rem", color: OFF_WHITE }}>{m}</span>
+        {/* Manage members tab (founder only) */}
+        {isCreator && groupTab === "manage" && (
+          <div>
+            <div style={{ color: TEXT_SEC, fontSize: "0.8rem", lineHeight: 1.5, marginBottom: 16 }}>Remove a member from <strong style={{ color: OFF_WHITE }}>{g.name}</strong>. This only removes them from this group — their account, global score, and any other groups are unaffected, and they can rejoin from your invite link.</div>
+            {g.members.filter(m => m !== user.username).length === 0 ? (
+              <div style={{ ...s.card, textAlign: "center", padding: "30px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No other members yet. Share your invite link to add friends.</div></div>
+            ) : g.members.filter(m => m !== user.username).map(m => (
+              <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "10px 0", borderBottom: `1px solid ${SURFACE2}` }}>
+                <span style={{ fontSize: "0.88rem", color: OFF_WHITE }}>{m}</span>
                 {confirmRemove === m ? (
                   <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
                     <span style={{ ...s.mono, fontSize: "0.64rem", color: TEXT_MUTED }}>Remove?</span>
