@@ -214,6 +214,22 @@ const dailyStats = (subs, usernames) => {
   return { played, correct, pctCorrect: Math.round((correct / played) * 100), avgScore: Math.round(totalPts / played) };
 };
 
+// Acquisition source of an account, with graceful fallback for older records:
+// signupSource (new) → referralSource (earlier) → inferred from referredBy → direct.
+const sourceOf = (u) => {
+  if (!u) return "direct";
+  if (u.signupSource) return u.signupSource;
+  if (u.referralSource) return u.referralSource;
+  return u.referredBy ? "friend" : "direct";
+};
+const SOURCE_META = {
+  friend:    { label: "Refer-a-friend", color: "#C9A84C" },
+  group:     { label: "Group link",     color: "#6495ED" },
+  instagram: { label: "Instagram",      color: "#E1306C" },
+  direct:    { label: "Direct",         color: "#7A7A7A" },
+};
+const SOURCE_ORDER = ["friend", "group", "instagram", "direct"];
+
 // Speed-based scoring
 const GRACE_PERIOD = 15;                     // seconds at full points
 const DECAY_RATE   = 0.01;                   // 1% per second lost after grace ends
@@ -379,6 +395,8 @@ export default function App() {
       if (joinParam) localStorage.setItem("whatis_join", joinParam);
       const byParam = params.get("by");
       if (byParam) localStorage.setItem("whatis_join_by", byParam);
+      const srcParam = params.get("src") || params.get("utm_source");
+      if (srcParam) localStorage.setItem("whatis_src", srcParam);
     } catch (e) {}
     // Clean up stale submission entries from previous days
     const today = todayKey();
@@ -751,19 +769,22 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
       if (users[form.username]) return setError("Username taken.");
       if (Object.values(users || {}).some(u => u && (u.email || "").trim().toLowerCase() === email)) return setError("An account with this email already exists.");
-      // Attribute a signup that arrived from a shared link — either a refer-a-friend
-      // link (?ref=) or a group invite link (?join=…&by=). referralSource notes which.
-      const { referredBy, referralSource } = (() => {
+      // Where this signup came from: refer-a-friend link (?ref=), group invite link
+      // (?join=…&by=), Instagram (?src=ig / utm_source=instagram), else direct.
+      // referredBy is the inviter username for friend/group joins.
+      const { referredBy, signupSource } = (() => {
         const norm = (v) => (v && String(v).toLowerCase() !== form.username.toLowerCase()) ? v : "";
         try {
           const ref = norm(localStorage.getItem("whatis_ref"));
-          if (ref) return { referredBy: ref, referralSource: "friend" };
+          if (ref) return { referredBy: ref, signupSource: "friend" };
           const joinBy = norm(localStorage.getItem("whatis_join_by"));
-          if (localStorage.getItem("whatis_join") && joinBy) return { referredBy: joinBy, referralSource: "group" };
+          if (localStorage.getItem("whatis_join") && joinBy) return { referredBy: joinBy, signupSource: "group" };
+          const src = (localStorage.getItem("whatis_src") || "").toLowerCase();
+          if (src === "ig" || src === "instagram") return { referredBy: "", signupSource: "instagram" };
         } catch (e) {}
-        return { referredBy: "", referralSource: "" };
+        return { referredBy: "", signupSource: "direct" };
       })();
-      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy, referralSource };
+      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy, signupSource };
       let res;
       try {
         res = await atomicPost("/api/register", { username: form.username, password: form.password, profile });
@@ -776,7 +797,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       const u = res.user || profile;
       setUser(u); localStorage.setItem("whatis_user", JSON.stringify(u));
       setUsers(prev => ({ ...prev, [form.username]: u }));
-      try { localStorage.removeItem("whatis_ref"); } catch (e) {}
+      try { localStorage.removeItem("whatis_ref"); localStorage.removeItem("whatis_src"); } catch (e) {}
     } else {
       let res;
       try {
@@ -3147,6 +3168,29 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                 </div>
               </div>
               <div style={{ color: TEXT_SEC, fontSize: "0.82rem", marginBottom: 18 }}>{rows.length} account{rows.length !== 1 ? "s" : ""} created in the {rangeLabel}, newest first.</div>
+              {rows.length > 0 && (() => {
+                const counts = { friend: 0, group: 0, instagram: 0, direct: 0 };
+                rows.forEach(r => { counts[sourceOf(r.u)] = (counts[sourceOf(r.u)] || 0) + 1; });
+                const total = rows.length;
+                return (
+                  <div style={{ ...s.card, padding: "14px 16px", marginBottom: 18 }}>
+                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 10 }}>Where they came from</div>
+                    <div style={{ display: "flex", height: 16, borderRadius: 8, overflow: "hidden", border: `1px solid ${SURFACE3}`, background: SURFACE2 }}>
+                      {SOURCE_ORDER.map(k => counts[k] ? <div key={k} title={`${SOURCE_META[k].label}: ${counts[k]}`} style={{ width: `${(counts[k] / total) * 100}%`, background: SOURCE_META[k].color }} /> : null)}
+                    </div>
+                    <div style={{ display: "flex", flexWrap: "wrap", gap: "8px 18px", marginTop: 12 }}>
+                      {SOURCE_ORDER.map(k => (
+                        <div key={k} style={{ display: "flex", alignItems: "center", gap: 6 }}>
+                          <span style={{ width: 9, height: 9, borderRadius: 2, background: SOURCE_META[k].color, display: "inline-block" }} />
+                          <span style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC }}>{SOURCE_META[k].label}</span>
+                          <span style={{ ...s.mono, fontSize: "0.68rem", color: OFF_WHITE, fontWeight: 600 }}>{counts[k]}</span>
+                          <span style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED }}>({total ? Math.round((counts[k] / total) * 100) : 0}%)</span>
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                );
+              })()}
               {rows.length === 0
                 ? <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No new accounts in the {rangeLabel}.</div></div>
                 : rows.map((r, i) => {
@@ -3162,6 +3206,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                           <div style={{ fontWeight: 600, fontSize: "0.88rem", color: OFF_WHITE, display: "flex", alignItems: "center", gap: 7, flexWrap: "wrap" }}>
                             {name}
                             {u.state && <span style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 5px" }}>{u.state}</span>}
+                            {(() => { const meta = SOURCE_META[sourceOf(u)]; return <span style={{ ...s.mono, fontSize: "0.58rem", color: meta.color, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 4, padding: "1px 6px" }}>{meta.label}</span>; })()}
                           </div>
                           <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginTop: 2, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.email || "no email"}</div>
                         </div>
@@ -3247,7 +3292,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                             {list.map(u => (
                               <div key={u.username} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 8, padding: "3px 0", ...s.mono, fontSize: "0.68rem" }}>
                                 <span style={{ color: TEXT_SEC, minWidth: 0, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{u.displayName || u.username}</span>
-                                <span style={{ color: u.referralSource === "group" ? "#6495ED" : GOLD, flexShrink: 0 }}>{u.referralSource === "group" ? "group link" : "refer-a-friend"}</span>
+                                <span style={{ color: sourceOf(u) === "group" ? "#6495ED" : GOLD, flexShrink: 0 }}>{sourceOf(u) === "group" ? "group link" : "refer-a-friend"}</span>
                               </div>
                             ))}
                           </div>
