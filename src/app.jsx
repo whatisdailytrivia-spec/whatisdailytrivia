@@ -1159,7 +1159,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
             {refOpen && (
               <div style={{ ...s.card, padding: "16px 18px", marginTop: 8 }}>
                 <div style={{ color: TEXT_SEC, fontSize: "0.82rem", lineHeight: 1.5, marginBottom: 12 }}>
-                  Share your link — every friend who joins makes the leaderboard tougher.
+                  Share your link — add your friends to the Global leaderboard.
                 </div>
                 <div style={{ display: "flex", alignItems: "center", gap: 8, background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "10px 12px", marginBottom: 12 }}>
                   <span style={{ ...s.mono, fontSize: "0.72rem", color: TEXT_SEC, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap", flex: 1 }}>{refLink}</span>
@@ -1712,10 +1712,8 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     return g.members.map(m => byUser[m] || { username: m, points: 0, correct: 0, answered: 0, streak: 0 });
   };
   const [createName, setCreateName] = useState("");
-  const [joinCode, setJoinCode] = useState("");
   const [creating, setCreating] = useState(false);
   const [createError, setCreateError] = useState("");
-  const [joinError, setJoinError] = useState("");
   const [createSuccess, setCreateSuccess] = useState("");
   const [loading, setLoading] = useState(true);
   const [renaming, setRenaming] = useState(false);
@@ -1727,6 +1725,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
   const [banterUnread, setBanterUnread] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [confirmRemove, setConfirmRemove] = useState(null);
 
   // Poll the active group's chat for unread messages (badge on the Group Banter button).
   useEffect(() => {
@@ -1792,37 +1791,16 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     setCreateSuccess(code);
   };
 
-  const joinGroup = async () => {
-    setJoinError("");
-    const code = joinCode.toUpperCase().trim();
-    if (!code) return setJoinError("Enter an invite code.");
-    if (user.groups?.includes(code)) return setJoinError("You're already in this group.");
-    try {
-      const r = await apiStorage.get(`group:${code}`);
-      if (!r) return setJoinError("Group not found. Check the code and try again.");
-      const group = JSON.parse(r.value);
-      const joinMeta = { method: "code", at: Date.now() };
-      if (!group.members.includes(user.username)) group.members.push(user.username);
-      group.joinMeta = { ...(group.joinMeta || {}), [user.username]: (group.joinMeta || {})[user.username] || joinMeta };
-      await recordGroupJoin(`group:${code}`, user.username, joinMeta);
-      const updatedGroups = [...(user.groups || []), code];
-      const nu = { ...user, groups: updatedGroups };
-      await saveUser(user.username, { groups: updatedGroups });
-      setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
-      // Back-fill the group board with the player's current month global score
-      try {
-        const gl = await apiStorage.get(`leaderboard:${monthKey()}`).catch(() => null);
-        const gEntry = gl ? (JSON.parse(gl.value) || []).find(e => e.username === user.username) : null;
-        if (gEntry) await upsertEntry(`grouplb:${code}:${monthKey()}`, { ...gEntry });
-      } catch (e) {}
-      const lbR = await apiStorage.get(`grouplb:${code}:${monthKey()}`).catch(() => null);
-      const grp = { ...groupData, [code]: group };
-      const glb = { ...groupLBs, [code]: lbR ? JSON.parse(lbR.value) : [] };
-      setGroupData(grp); setGroupLBs(glb);
-      setJoinCode("");
-      // Go straight to the group leaderboard
-      setActiveGroup(code); setView("group");
-    } catch(e) { setJoinError("Something went wrong. Try again."); }
+  // Founder-only: remove another member from the group. Drops them from the members
+  // list (so the derived group board no longer shows them) and from their own groups[].
+  const removeMember = async (username) => {
+    const code = activeGroup;
+    if (!code || username === user.username) return;
+    await mutateGroupMembers(`group:${code}`, (m) => m.filter(x => x !== username));
+    setGroupData(prev => { const g = prev[code]; return g ? { ...prev, [code]: { ...g, members: (g.members || []).filter(x => x !== username) } } : prev; });
+    const target = users[username];
+    if (target && Array.isArray(target.groups)) await saveUser(username, { groups: target.groups.filter(c => c !== code) });
+    setConfirmRemove(null);
   };
 
   const renameGroup = async () => {
@@ -1887,15 +1865,15 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
             </button>
             {/* Invite */}
             <div style={{ position: "relative" }}>
-              <button onClick={() => { setInviteOpen(o => !o); setInviteCopied(false); }} title="Invite code" style={{ display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${inviteOpen ? GOLD : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: inviteOpen ? GOLD : OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+              <button onClick={() => { setInviteOpen(o => !o); setInviteCopied(false); }} title="Invite link" style={{ display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${inviteOpen ? GOLD : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: inviteOpen ? GOLD : OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
                 🔗 Invite
               </button>
               {inviteOpen && (
                 <>
                   <div onClick={() => setInviteOpen(false)} style={{ position: "fixed", inset: 0, zIndex: 300 }} />
-                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 301, width: 250, background: SURFACE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)" }}>
-                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Invite to group — share the link</div>
-                    <div style={{ ...s.mono, fontSize: "0.7rem", color: GOLD, letterSpacing: "0.16em", textAlign: "center", marginBottom: 11 }}>Code: {g.code}</div>
+                  <div style={{ position: "absolute", top: "calc(100% + 8px)", right: 0, zIndex: 301, width: 268, background: SURFACE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px", boxShadow: "0 8px 28px rgba(0,0,0,0.55)" }}>
+                    <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.1em", marginBottom: 7 }}>Share your invite link</div>
+                    <div style={{ fontSize: "0.72rem", color: TEXT_SEC, lineHeight: 1.5, marginBottom: 11 }}>Anyone who joins from your link is added to <strong style={{ color: OFF_WHITE }}>{g.name}</strong> <strong style={{ color: GOLD }}>and the Global Leaderboard</strong>.</div>
                     {(() => {
                       const joinLink = `${window.location.origin}/?join=${g.code}&by=${encodeURIComponent(user.username)}`;
                       const joinMsg = `Join our group on WhatIs... Daily Trivia -\n\nOne Question.\nEvery Morning.\nMonthly Prizes.\n\n${joinLink}`;
@@ -1956,6 +1934,27 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
           </>;
         })()}
 
+        {/* Manage members (founder only) */}
+        {isCreator && g.members.filter(m => m !== user.username).length > 0 && (
+          <div style={{ marginTop: 18 }}>
+            <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 8 }}>Manage members · founder only</div>
+            {g.members.filter(m => m !== user.username).map(m => (
+              <div key={m} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", gap: 10, padding: "8px 0", borderBottom: `1px solid ${SURFACE2}` }}>
+                <span style={{ fontSize: "0.84rem", color: OFF_WHITE }}>{m}</span>
+                {confirmRemove === m ? (
+                  <span style={{ display: "flex", gap: 6, alignItems: "center" }}>
+                    <span style={{ ...s.mono, fontSize: "0.64rem", color: TEXT_MUTED }}>Remove?</span>
+                    <button onClick={() => removeMember(m)} style={{ background: "#E05C5C", color: "#fff", border: "none", borderRadius: 6, padding: "5px 11px", fontFamily: SANS, fontSize: "0.72rem", fontWeight: 600, cursor: "pointer" }}>Yes</button>
+                    <button onClick={() => setConfirmRemove(null)} style={{ ...s.btnSec, padding: "5px 11px", fontSize: "0.72rem" }}>No</button>
+                  </span>
+                ) : (
+                  <button onClick={() => setConfirmRemove(m)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "5px 12px", color: "#E05C5C", fontFamily: SANS, fontSize: "0.72rem", cursor: "pointer" }}>Remove</button>
+                )}
+              </div>
+            ))}
+          </div>
+        )}
+
         {/* Leave group */}
         <div style={{ marginTop: 8, borderTop: `1px solid ${SURFACE3}`, paddingTop: 20 }}>
           {confirmLeave ? (
@@ -2002,18 +2001,16 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         <button onClick={() => { setView("home"); setCreateName(""); setCreateError(""); setCreateSuccess(""); }} style={{ ...s.btnSec, marginBottom: 24, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Back</button>
         <div style={s.label}>New group</div>
         <div style={{ ...s.h2, marginBottom: 6 }}>Create a Group</div>
-        <div style={{ color: TEXT_SEC, fontSize: "0.83rem", marginBottom: 24 }}>Give your group a name — you'll get an invite code to share with members.</div>
+        <div style={{ color: TEXT_SEC, fontSize: "0.83rem", marginBottom: 24 }}>Give your group a name — you'll get an invite link to share with friends.</div>
         {createSuccess ? (
           <div>
             <div style={{ background: "rgba(76,175,125,0.1)", border: "1px solid rgba(76,175,125,0.3)", borderRadius: 10, padding: "24px", textAlign: "center", marginBottom: 16 }}>
               <div style={{ fontSize: "1.6rem", marginBottom: 10 }}>🎉</div>
               <div style={{ color: "#4CAF7D", fontWeight: 600, fontSize: "1rem", marginBottom: 6 }}>Group created!</div>
-              <div style={{ color: TEXT_SEC, fontSize: "0.83rem", marginBottom: 16 }}>Share this code with anyone you want to invite:</div>
-              <div style={{ ...s.mono, fontSize: "2rem", fontWeight: 700, color: GOLD, letterSpacing: "0.2em", marginBottom: 4 }}>{createSuccess}</div>
-              <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_MUTED }}>Members enter this code under Groups → Join a Group</div>
+              <div style={{ color: TEXT_SEC, fontSize: "0.83rem", lineHeight: 1.5 }}>Open your group and tap <strong style={{ color: GOLD }}>🔗 Invite</strong> to share your link. Everyone who joins from it is added to your group <strong style={{ color: OFF_WHITE }}>and the Global Leaderboard</strong>.</div>
             </div>
             <button style={{ ...s.btn, width: "100%" }} onClick={() => { setActiveGroup(createSuccess); setView("group"); setCreateSuccess(""); }}>
-              View group leaderboard →
+              View group & get invite link →
             </button>
           </div>
         ) : (
@@ -2030,37 +2027,6 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
             </div>
           </div>
         )}
-      </div>
-    );
-  }
-
-  // ── Join group view ─────────────────────────────────────────────────────
-  if (view === "join") {
-    return (
-      <div>
-        <button onClick={() => { setView("home"); setJoinCode(""); setJoinError(""); }} style={{ ...s.btnSec, marginBottom: 24, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Back</button>
-        <div style={s.label}>Join a group</div>
-        <div style={{ ...s.h2, marginBottom: 6 }}>Enter Invite Code</div>
-        <div style={{ color: TEXT_SEC, fontSize: "0.83rem", marginBottom: 24 }}>Ask the group creator for their 6-character invite code and enter it below.</div>
-        <div style={s.card}>
-          <div style={s.accent} />
-          <div style={{ display: "flex", flexDirection: "column", gap: 10 }}>
-            <div>
-              <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Invite code</div>
-              <input
-                style={{ ...s.input, textTransform: "uppercase", letterSpacing: "0.18em", fontFamily: "'Courier New',monospace", fontSize: "1.1rem", textAlign: "center" }}
-                placeholder="XXX-XXX"
-                value={joinCode}
-                maxLength={7}
-                onChange={e => { setJoinCode(e.target.value); setJoinError(""); }}
-                onKeyDown={e => e.key === "Enter" && joinGroup()}
-                autoFocus
-              />
-            </div>
-            {joinError && <div style={{ color: "#E05C5C", fontSize: "0.8rem" }}>{joinError}</div>}
-            <button style={{ ...s.btn, width: "100%", marginTop: 4 }} onClick={joinGroup}>Join group</button>
-          </div>
-        </div>
       </div>
     );
   }
@@ -2089,7 +2055,6 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
                     <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, marginBottom: 4 }}>{g.name}</div>
                     <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
                       <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""}</div>
-                      <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: TEXT_MUTED, fontSize: "0.62rem" }}>{g.code}</div>
                     </div>
                   </div>
                   <div style={{ textAlign: "right" }}>
@@ -2105,23 +2070,15 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         </div>
       )}
 
-      {/* Main CTAs */}
-      <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 10 }}>
-        <div onClick={() => setView("create")} style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${SURFACE2}`, borderRadius: 10, padding: "16px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = SURFACE3; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = SURFACE2; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}>
-          <div style={{ fontSize: "1.1rem", marginBottom: 7, opacity: 0.4 }}>➕</div>
-          <div style={{ fontFamily: SERIF, fontSize: "0.85rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Create a Group</div>
-          <div style={{ color: TEXT_MUTED, fontSize: "0.7rem", lineHeight: 1.5 }}>Start a private leaderboard and invite your crew</div>
-        </div>
-        <div onClick={() => setView("join")} style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${SURFACE2}`, borderRadius: 10, padding: "16px 14px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
-          onMouseEnter={e => { e.currentTarget.style.borderColor = SURFACE3; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
-          onMouseLeave={e => { e.currentTarget.style.borderColor = SURFACE2; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}>
-          <div style={{ fontSize: "1.1rem", marginBottom: 7, opacity: 0.4 }}>🔗</div>
-          <div style={{ fontFamily: SERIF, fontSize: "0.85rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Join a Group</div>
-          <div style={{ color: TEXT_MUTED, fontSize: "0.7rem", lineHeight: 1.5 }}>Enter an invite code to join an existing group</div>
-        </div>
+      {/* Main CTA — groups are link-only; joining happens by opening a member's invite link */}
+      <div onClick={() => setView("create")} style={{ background: "rgba(255,255,255,0.015)", border: `1px solid ${SURFACE2}`, borderRadius: 10, padding: "18px 16px", textAlign: "center", cursor: "pointer", transition: "border-color 0.2s, background 0.2s" }}
+        onMouseEnter={e => { e.currentTarget.style.borderColor = SURFACE3; e.currentTarget.style.background = "rgba(255,255,255,0.03)"; }}
+        onMouseLeave={e => { e.currentTarget.style.borderColor = SURFACE2; e.currentTarget.style.background = "rgba(255,255,255,0.015)"; }}>
+        <div style={{ fontSize: "1.1rem", marginBottom: 7, opacity: 0.4 }}>➕</div>
+        <div style={{ fontFamily: SERIF, fontSize: "0.9rem", fontWeight: 600, color: TEXT_SEC, marginBottom: 4 }}>Create a Group</div>
+        <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", lineHeight: 1.5 }}>Start a private leaderboard, then share your invite link to add friends</div>
       </div>
+      <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", textAlign: "center", marginTop: 14, lineHeight: 1.5 }}>To join a group, just open the invite link a member shares with you — no code needed.</div>
     </div>
   );
 }
