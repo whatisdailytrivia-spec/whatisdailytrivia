@@ -661,6 +661,26 @@ app.post("/api/login", async (req, res) => {
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
+// Admin-only password reset: sets a NEW hashed credential for any user WITHOUT
+// needing their old password. Gated by the shared admin password (the same one that
+// unlocks the Admin panel). Flow: an admin sets a temporary password and gives it to
+// the user, who then signs in and can change it under My Account.
+const ADMIN_PASSWORD = "whatis2026";
+app.post("/api/admin-reset-password", async (req, res) => {
+  try {
+    const { adminPassword, username, newPassword } = req.body;
+    if (adminPassword !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: "forbidden" });
+    if (!username || !newPassword || String(newPassword).length < 6) return res.status(400).json({ ok: false, error: "username and newPassword (min 6 chars) required" });
+    const usersRaw = await dbGet("users");
+    const users = usersRaw ? JSON.parse(usersRaw) : {};
+    const rec = users[username];
+    if (!rec) return res.json({ ok: false, error: "user not found" });
+    await dbSet(`cred:${username}`, JSON.stringify({ hash: hashPw(newPassword), email: rec.email || "" }));
+    await scrubPassword(username);
+    res.json({ ok: true });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
 // Change password: requires the current password, updates the hashed credential.
 app.post("/api/change-password", async (req, res) => {
   try {

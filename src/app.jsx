@@ -2578,6 +2578,8 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [editingUser, setEditingUser] = useState(null);
   const [editForm, setEditForm]   = useState({});
   const [userSaved, setUserSaved] = useState(false);
+  const [pwReset, setPwReset] = useState("");
+  const [pwResetMsg, setPwResetMsg] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [userSort, setUserSort]   = useState("newest"); // newest | oldest | alpha
   const [backingUp, setBackingUp] = useState(false);
@@ -3781,7 +3783,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             if (!list.length) return <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", padding: "20px 0", textAlign: "center" }}>No users match your search.</div>;
             return list.map(u => (
             <div key={u.username}>
-              <div onClick={() => { setEditingUser(editingUser === u.username ? null : u.username); setEditForm({ ...u }); setUserSaved(false); }}
+              <div onClick={() => { setEditingUser(editingUser === u.username ? null : u.username); setEditForm({ ...u }); setUserSaved(false); setPwReset(""); setPwResetMsg(""); }}
                 style={{ display: "grid", gridTemplateColumns: "1fr auto auto", alignItems: "center", gap: 10,
                   padding: "11px 14px", background: editingUser === u.username ? "rgba(201,168,76,0.06)" : SURFACE,
                   border: `1px solid ${editingUser === u.username ? "rgba(201,168,76,0.3)" : SURFACE3}`,
@@ -3912,6 +3914,21 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                     setUserSaved(true);
                     setTimeout(() => setUserSaved(false), 3000);
                   }}>↺ Reset today's submission</button>
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${SURFACE3}` }}>
+                    <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Reset password</div>
+                    <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginBottom: 8, lineHeight: 1.5 }}>Set a temporary password for <b style={{ color: OFF_WHITE }}>{u.username}</b> and share it with them. They sign in with it (username is <b style={{ color: OFF_WHITE }}>{u.username}</b>), then change it under My Account.</div>
+                    <div style={{ display: "flex", gap: 8 }}>
+                      <input style={{ ...s.input, flex: 1 }} type="text" placeholder="Temp password (min 6 chars)" value={pwReset} onChange={e => { setPwReset(e.target.value); setPwResetMsg(""); }} />
+                      <button style={{ ...s.btn, whiteSpace: "nowrap", padding: "9px 14px", opacity: pwReset.trim().length < 6 ? 0.5 : 1 }} disabled={pwReset.trim().length < 6} onClick={async () => {
+                        try {
+                          const r = await atomicPost("/api/admin-reset-password", { adminPassword: ADMIN_PASSWORD, username: u.username, newPassword: pwReset.trim() });
+                          if (r && r.ok) setPwResetMsg(`done:Done. Give them — username: ${u.username} · temp password: ${pwReset.trim()}`);
+                          else setPwResetMsg(`err:Couldn't reset — ${(r && r.error) || "try again"}`);
+                        } catch (e) { setPwResetMsg("err:Couldn't reach the server. Try again."); }
+                      }}>Set</button>
+                    </div>
+                    {pwResetMsg && <div style={{ fontSize: "0.78rem", color: pwResetMsg.startsWith("done:") ? "#4CAF7D" : "#E05C5C", marginTop: 8, lineHeight: 1.5, wordBreak: "break-word" }}>{pwResetMsg.replace(/^(done:|err:)/, "")}</div>}
+                  </div>
                   {userSaved && <div style={{ color: "#4CAF7D", fontSize: "0.8rem", marginTop: 7, textAlign: "center" }}>✓ Saved</div>}
                 </div>
               )}
