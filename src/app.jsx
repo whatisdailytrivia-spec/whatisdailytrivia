@@ -864,12 +864,23 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     const speedMult    = calcMultiplier(responseTime);
     const correct      = checkAnswer(answer, question.answer, question.aliases || []);
     const base         = (question && question.id !== "q1" && question.points) ? question.points : 0;
-    const pts          = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
+    const speedPts     = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
     const excluded     = isExcludedUser(user.username);
     // First correct answer of the day (real players only) — informational only, no scoring effect
     const globalCorrectCount = Object.entries(submissions).filter(([u, sb]) => sb.isCorrect && !isExcludedUser(u)).length;
     const isFirstCorrect = correct && !excluded && globalCorrectCount === 0;
+    // Streak (mirrors the server rule) computed up front so the Streak Bonus can be layered on.
+    const playDay = todayKey();
+    const streak = !correct
+      ? 0
+      : user.lastPlayed === playDay
+        ? (user.streak || 0)
+        : (!user.lastPlayed || user.lastPlayed === prevDayKey(playDay)) ? (user.streak || 0) + 1 : 1;
+    const lastPlayed = playDay;
+    const streakBonus = (correct && streak >= 2) ? streak : 0;   // +1 pt per day once streak ≥ 2
+    const pts = speedPts + streakBonus;
     const sub = { answer, isCorrect: correct, points: pts, basePoints: base,
+      speedPoints: speedPts, streakBonus, streak,
       speedMult: Math.round(speedMult * 100),
       time: new Date().toISOString(), responseTime };
     const newSubs = { ...submissions, [user.username]: sub };
@@ -880,13 +891,6 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     // Streak = consecutive days answered correctly. Mirrors the server rule: wrong answer
     // breaks it, missing a day breaks it. A record with no lastPlayed yet is grandfathered
     // & extended on a correct day, never wiped.
-    const playDay = todayKey();
-    const streak = !correct
-      ? 0
-      : user.lastPlayed === playDay
-        ? (user.streak || 0)
-        : (!user.lastPlayed || user.lastPlayed === prevDayKey(playDay)) ? (user.streak || 0) + 1 : 1;
-    const lastPlayed = playDay;
     const nu = { ...user, streak, lastPlayed };
     setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
     await saveUser(user.username, { streak, lastPlayed });
@@ -1149,6 +1153,19 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                   <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: GOLD }}>+{sub?.points}</div>
                 </div>
               </div>
+              {ok && (sub?.streakBonus > 0 ? (
+                <div style={{ marginTop: 12, padding: "11px 16px", background: "rgba(63,185,80,0.10)", border: "1px solid rgba(63,185,80,0.32)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
+                  <div>
+                    <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#3FB950" }}>🔥 Streak Bonus</div>
+                    <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, marginTop: 2 }}>{sub.streak}-day streak · +1 pt per day after day 1</div>
+                  </div>
+                  <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: "#3FB950" }}>+{sub.streakBonus}</div>
+                </div>
+              ) : (
+                <div style={{ marginTop: 12, padding: "10px 14px", background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 8, textAlign: "center", ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED }}>
+                  🔥 Come back tomorrow — a 2-day streak starts earning Streak Bonus points.
+                </div>
+              ))}
               <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(76,175,125,0.08)", border: "1px solid rgba(76,175,125,0.25)", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
@@ -2465,6 +2482,17 @@ function RulesTab() {
           Answer within 15 seconds for full points.<br />
           Every second after costs 1%.<br />
           Minimum floor of 25%.
+        </div>
+        </div>
+      </div>
+      <div style={{ background: "rgba(63,185,80,0.07)", border: "1px solid rgba(63,185,80,0.30)", borderRadius: 10, padding: "14px 16px", marginTop: 8, marginBottom: 10, display: "flex", alignItems: "center", gap: 14 }}>
+        <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>🔥</span>
+        <div>
+          <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#3FB950", marginBottom: 4 }}>Streak Bonus</div>
+          <div style={{ fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 2 }}>
+          Answer correctly on back-to-back days to build a streak.<br />
+          Each day, earn bonus points equal to your streak — once it reaches 2.<br />
+          A 2-day streak is +2, a 5-day streak is +5, and so on. Miss a day or answer wrong and it resets.
         </div>
         </div>
       </div>

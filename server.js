@@ -518,10 +518,36 @@ app.post("/api/grade", async (req, res) => {
     const correct = checkAnswer(guess || "", q.answer, q.aliases || []);
     const excluded = isExcludedUser(username);
     const base = q.points;
-    const pts = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
+    const speedPts = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
+
+    // Profile / streak (server-owned) — computed BEFORE final scoring so the Streak Bonus
+    // can be layered on. Streak = consecutive days answered CORRECTLY; it breaks if you
+    // answer wrong OR miss a day. `date` is this player's resolved question-day; the
+    // one-submission-per-day guard below means this runs at most once per player per day.
+    // A record with no lastPlayed yet (pre-rewrite / migrated account) is grandfathered &
+    // extended on a correct day, never reset on deploy — so going live never wipes a live streak.
+    const usersRaw = await dbGet("users");
+    const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
+    const rec = usersObj[username] || {};
+    const prevLast = rec.lastPlayed || null;
+    let streak;
+    if (!correct) streak = 0;                                                          // wrong answer breaks the streak
+    else if (prevLast === date) streak = rec.streak || 1;                              // already counted today (defensive)
+    else if (!prevLast || prevLast === prevDay(date)) streak = (rec.streak || 0) + 1;  // correct on a consecutive day / grandfathered
+    else streak = 1;                                                                   // correct, but a day was missed → fresh start
+    const lastPlayed = date;
+
+    // ── Streak Bonus Points ──────────────────────────────────────────────────────────
+    // +1 point per day of your current streak, applied only once the streak reaches 2
+    // (streak 1 → +0, streak 2 → +2, streak 3 → +3 …). Layered on TOP of the speed-adjusted
+    // base points (not capped by the question's base). Drives return engagement: every
+    // consecutive correct day is worth more. Uses the streak AFTER today's correct answer.
+    const streakBonus = (correct && streak >= 2) ? streak : 0;
+    const pts = speedPts + streakBonus;
 
     const sub = {
       answer: String(guess || ""), isCorrect: correct, points: pts, basePoints: base,
+      speedPoints: speedPts, streakBonus, streak,
       speedMult: Math.round(speedMult * 100), time: new Date().toISOString(), responseTime,
     };
 
@@ -530,23 +556,6 @@ app.post("/api/grade", async (req, res) => {
     if (ins && ins.dup) return res.json({ ok: true, already: true, result: ins.existing || {}, displayAnswer: reveal });
     const isFirstCorrect = correct && !excluded && ins.priorCorrect === 0;
 
-    // Profile / streak (server-owned)
-    const usersRaw = await dbGet("users");
-    const usersObj = usersRaw ? JSON.parse(usersRaw) : {};
-    const rec = usersObj[username] || {};
-    // Streak = consecutive days answered CORRECTLY. It breaks if you answer wrong OR if
-    // you miss a day. `date` is this player's resolved question-day; the one-submission-
-    // per-day guard above means this runs at most once per player per day. A record with
-    // no lastPlayed yet (pre-rewrite account, incl. those seeded by
-    // migrateStreakLastPlayed) is grandfathered & extended on a correct day, never reset
-    // on deploy — so going live never wipes a streak that's currently alive.
-    const prevLast = rec.lastPlayed || null;
-    let streak;
-    if (!correct) streak = 0;                                                          // wrong answer breaks the streak
-    else if (prevLast === date) streak = rec.streak || 1;                              // already counted today (defensive)
-    else if (!prevLast || prevLast === prevDay(date)) streak = (rec.streak || 0) + 1;  // correct on a consecutive day / grandfathered
-    else streak = 1;                                                                   // correct, but a day was missed → fresh start
-    const lastPlayed = date;
     await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ streak, lastPlayed }), "merge"]);
 
     // Global leaderboard (hosts tracked but scored 0)
@@ -597,7 +606,7 @@ app.post("/api/grade", async (req, res) => {
     };
     await dbSet(`history:${username}`, JSON.stringify(history));
 
-    res.json({ ok: true, result: sub, displayAnswer: reveal, funFact: q.funFact || null, isFirstCorrect, streak, lastPlayed, history });
+    res.json({ ok: true, result: sub, displayAnswer: reveal, funFact: q.funFact || null, isFirstCorrect, streak, streakBonus, lastPlayed, history });
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
 
