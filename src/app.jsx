@@ -2489,10 +2489,8 @@ function RulesTab() {
         <span style={{ fontSize: "1.5rem", flexShrink: 0 }}>🔥</span>
         <div>
           <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#3FB950", marginBottom: 4 }}>Streak Bonus</div>
-          <div style={{ fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 2 }}>
-          Answer correctly on back-to-back days to build a streak.<br />
-          Each day, earn bonus points equal to your streak — once it reaches 2.<br />
-          A 2-day streak is +2, a 5-day streak is +5, and so on. Miss a day or answer wrong and it resets.
+          <div style={{ fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 1.6 }}>
+          Correct on back-to-back days earns bonus points equal to your streak once it hits 2 (5-day streak = +5); a wrong answer or missed day resets it.
         </div>
         </div>
       </div>
