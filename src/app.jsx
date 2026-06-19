@@ -2589,6 +2589,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [pw, setPw]             = useState("");
   const [pwErr, setPwErr]       = useState("");
   const [section, setSection]   = useState("analytics");
+  const [previewCat, setPreviewCat] = useState("All"); // category filter for Running Questions List
   const [adminGroups, setAdminGroups] = useState(null); // all groups (admin manager)
   const [delGroupCode, setDelGroupCode] = useState(null); // group pending delete confirm
   const [groupBusy, setGroupBusy] = useState(false);
@@ -4017,22 +4018,34 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           }
         });
 
+        // Categories present, ordered by the canonical CAT map then any extras
+        const present = Array.from(new Set(items.map(it => it.category)));
+        const catFilters = ["All", ...Object.keys(CAT).filter(c => present.includes(c)), ...present.filter(c => !CAT[c])];
+        const shown = previewCat === "All" ? items : items.filter(it => it.category === previewCat);
+
         const grouped = {};
         const order = [];
-        items.forEach(item => {
+        shown.forEach(item => {
           if (!grouped[item.monthKey]) { grouped[item.monthKey] = []; order.push(item.monthKey); }
           grouped[item.monthKey].push(item);
         });
 
         return (
           <div>
-            <div style={{ marginBottom: 18, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
-              <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{items.length} upcoming question{items.length !== 1 ? "s" : ""} across {order.length} month{order.length !== 1 ? "s" : ""}</span>
-              {items.length > 0 && (
+            <div style={{ marginBottom: 12, display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: 8 }}>
+              <span style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED }}>{shown.length} question{shown.length !== 1 ? "s" : ""}{previewCat === "All" ? ` across ${order.length} month${order.length !== 1 ? "s" : ""}` : ` in ${previewCat}`}</span>
+              {shown.length > 0 && (
                 <span style={{ ...s.mono, fontSize: "0.67rem", color: GOLD }}>
-                  Last question: {items[items.length - 1].dateStr}
+                  Last question: {shown[shown.length - 1].dateStr}
                 </span>
               )}
+            </div>
+            <div style={{ display: "flex", flexWrap: "wrap", gap: 6, marginBottom: 18 }}>
+              {catFilters.map(c => {
+                const on = previewCat === c;
+                const col = c === "All" ? GOLD : (CAT[c] || CAT.Wildcard).text;
+                return <button key={c} onClick={() => setPreviewCat(c)} style={{ padding: "4px 11px", borderRadius: 100, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: `1px solid ${on ? col : SURFACE3}`, background: on ? `${col}22` : "transparent", color: on ? col : TEXT_SEC }}>{c}</button>;
+              })}
             </div>
             {items.length === 0 ? (
               <div style={{ color: TEXT_MUTED, textAlign: "center", padding: "40px 0", fontSize: "0.85rem" }}>No upcoming questions found. Upload question banks in the 📅 Questions tab.</div>
