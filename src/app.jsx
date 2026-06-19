@@ -293,7 +293,7 @@ const CAT = {
   Sports: { bg: "rgba(100,149,237,0.12)", text: "#6495ED" },
   Science: { bg: "rgba(147,112,219,0.12)", text: "#9370DB" },
   History: { bg: "rgba(205,133,63,0.12)", text: "#CD853F" },
-  Psychology: { bg: "rgba(255,105,180,0.1)", text: "#FF69B4" },
+  Music: { bg: "rgba(63,185,80,0.12)", text: "#3FB950" },
   Wildcard: { bg: "rgba(200,80,80,0.1)", text: "#E05C5C" },
 };
 
@@ -2441,7 +2441,7 @@ function RulesTab() {
     { d: "Wed", cat: "Sports & Ent.",     c: "#6495ED" },
     { d: "Thu", cat: "US Politics",       c: "#C23939" },
     { d: "Fri", cat: "History",           c: "#CD853F" },
-    { d: "Sat", cat: "Psychology",        c: "#FF69B4" },
+    { d: "Sat", cat: "Music",             c: "#3FB950" },
     { d: "Sun", cat: "Wildcard",          c: "#E05C5C" },
   ];
   return (
