@@ -2819,6 +2819,11 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
       let series = [];
       const sR = await apiStorage.get("analytics_series").catch(() => null);
       if (sR) { try { series = JSON.parse(sR.value) || []; } catch(e) { series = []; } }
+      // Version guard: older cached points counted the host in answers/correct. Force a
+      // one-time full rebuild so every % metric excludes the host and ties out.
+      const SERIES_VER = "v2-noHost";
+      let verBump = false;
+      try { const vR = await apiStorage.get("analytics_series_ver").catch(() => null); if (!vR || vR.value !== SERIES_VER) { series = []; verBump = true; } } catch(e) { series = []; verBump = true; }
       const have = new Set(series.map(p => p.date));
 
       // Determine day 1: explicit launch date, else earliest account join
@@ -2850,9 +2855,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           let subs = {}; const sr = subResults[i];
           if (sr.status === "fulfilled" && sr.value) { try { subs = JSON.parse(sr.value.value) || {}; } catch(e) {} }
           const arc = arcMap[d] || {};
-          const arr = Object.values(subs);
-          const answers = arr.length;
-          const correct = arr.filter(x => x && x.isCorrect).length;
+          // % metrics count only real players who answered — exclude the host/excluded accounts.
+          const entries = Object.entries(subs).filter(([u]) => !isExcludedUser(u));
+          const answers = entries.length;
+          const correct = entries.filter(([, x]) => x && x.isCorrect).length;
           series.push({
             date: d,
             totalAccounts: users.filter(u => u.joined && u.joined <= d).length,
@@ -2875,6 +2881,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         series.sort((a, b) => a.date.localeCompare(b.date));
         await apiStorage.set("analytics_series", JSON.stringify(series));
       }
+      if (verBump) { try { await apiStorage.set("analytics_series_ver", SERIES_VER); } catch(e) {} }
       setAnalyticsSeries(series.slice().sort((a, b) => a.date.localeCompare(b.date)));
     } catch (e) { /* non-fatal */ }
   };
@@ -3041,11 +3048,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const stickiness = mau > 0 ? Math.round((dau / mau) * 100) : 0;
         const dauSeries = lastKeys(14).slice().reverse().map(k => ({ k, v: users.filter(u => playDates[u.username].has(k)).length }));
 
-        // ── Volume / accuracy / time ──
+        // ── Volume / time ── (% correct is computed from the submissions-based series below,
+        // so it counts only players who answered and ties out across every view)
         const sum = (f) => users.reduce((a, u) => a + (hist[u.username] ? (f(hist[u.username]) || 0) : 0), 0);
         const totalAnswers = sum(h => h.totalAnswered);
-        const totalCorrect = sum(h => h.totalCorrect);
-        const accuracy = totalAnswers > 0 ? Math.round((totalCorrect / totalAnswers) * 100) : 0;
         const avgPerUser = totalUsers > 0 ? totalAnswers / totalUsers : 0;
         const allTimes = users.flatMap(u => (hist[u.username]?.responseTimes) || []);
         const avgTime = allTimes.length ? Math.round(allTimes.reduce((a, b) => a + b, 0) / allTimes.length) : null;
@@ -3063,18 +3069,15 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const activation = totalUsers ? Math.round((playedAny.length / totalUsers) * 100) : 0;
         const depth = { one: playedAny.filter(u => distinctDays(u) === 1).length, few: playedAny.filter(u => { const d = distinctDays(u); return d >= 2 && d <= 5; }).length, many: playedAny.filter(u => distinctDays(u) >= 6).length };
 
-        // ── Question performance ──
-        const cats = {};
-        users.forEach(u => { const h = hist[u.username]; if (h && h.categoryStats) Object.entries(h.categoryStats).forEach(([c, st]) => { const o = cats[c] || (cats[c] = { answered: 0, correct: 0 }); o.answered += st.answered || 0; o.correct += st.correct || 0; }); });
+        // ── Question performance ── (avg response time per category, from per-account logs;
+        // % accuracy itself comes from the submissions-based series — see catRows below.)
         const catTime = {}; const byDate = {};
         users.forEach(u => { const h = hist[u.username]; if (h && Array.isArray(h.dailyLog)) h.dailyLog.forEach(e => {
           if (!e) return;
-          if (e.category && typeof e.responseTime === "number") { const t = catTime[e.category] || (catTime[e.category] = { sum: 0, n: 0 }); t.sum += e.responseTime; t.n++; }
-          if (e.date) { const d = byDate[e.date] || (byDate[e.date] = { answered: 0, correct: 0, sum: 0, n: 0, category: e.category }); d.answered++; if (e.correct) d.correct++; if (typeof e.responseTime === "number") { d.sum += e.responseTime; d.n++; } if (e.category) d.category = e.category; }
+          const ck = e.category === "Sports & Ent." ? "Sports & Entertainment" : e.category;
+          if (ck && typeof e.responseTime === "number") { const t = catTime[ck] || (catTime[ck] = { sum: 0, n: 0 }); t.sum += e.responseTime; t.n++; }
+          if (e.date) { const d = byDate[e.date] || (byDate[e.date] = { answered: 0, correct: 0, sum: 0, n: 0, category: ck }); d.answered++; if (e.correct) d.correct++; if (typeof e.responseTime === "number") { d.sum += e.responseTime; d.n++; } if (ck) d.category = ck; }
         }); });
-        const catRows = Object.entries(cats).filter(([, v]) => v.answered > 0).map(([c, v]) => ({ c, acc: Math.round((v.correct / v.answered) * 100), answered: v.answered, correct: v.correct, time: catTime[c] && catTime[c].n ? Math.round(catTime[c].sum / catTime[c].n) : null })).sort((a, b) => a.acc - b.acc);
-        const toughest = catRows[0]; const easiest = catRows[catRows.length - 1];
-        const recent = Object.entries(byDate).sort((a, b) => b[0].localeCompare(a[0])).slice(0, 14).map(([date, d]) => ({ date, category: d.category, answered: d.answered, acc: d.answered ? Math.round((d.correct / d.answered) * 100) : 0, time: d.n ? Math.round(d.sum / d.n) : null }));
 
         // ── helpers ──
         const Stat = ({ v, l, gold, sub }) => (
@@ -3129,8 +3132,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const subTitle = { ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginTop: 22, marginBottom: 10 };
 
         // ── Durable history series (back to day 1) + live "today" point ──
-        const todaysAnswers = Object.keys(adminSubmissions || {}).length;
-        const todaysCorrect = Object.values(adminSubmissions || {}).filter(x => x && x.isCorrect).length;
+        const todaysSubsArr = Object.entries(adminSubmissions || {}).filter(([u]) => !isExcludedUser(u));
+        const todaysAnswers = todaysSubsArr.length;
+        const todaysCorrect = todaysSubsArr.filter(([, x]) => x && x.isCorrect).length;
         const histSeries = (analyticsSeries || []).filter(p => p.date < today);
         const mergedSeries = [...histSeries, { date: today, totalAccounts: totalUsers, newAccounts: newToday, activeUsers: todaysAnswers, answers: todaysAnswers, correct: todaysCorrect, category: (question?.category || todayQ?.category || null), points: (question?.points != null ? question.points : (todayQ?.points != null ? todayQ.points : null)), _today: true }];
         const rangeN = analyticsRange === "30D" ? 30 : analyticsRange === "90D" ? 90 : 9999;
@@ -3141,7 +3145,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const PT_LABEL = { 100: "Easy", 200: "Medium", 300: "Hard", 400: "Expert" };
         const PT_COLOR = { 100: "#4CAF7D", 200: "#6495ED", 300: GOLD, 400: "#E05C5C" };
         const PT_TIERS = [100, 200, 300, 400];
-        const perfDays = mergedSeries.filter(p => p.category && p.points && p.answers > 0);
+        const canonCat = (c) => c === "Sports & Ent." ? "Sports & Entertainment" : c; // unify legacy label
+        // Single source of truth for ALL % metrics: one snapshot per aired day (submissions-based,
+        // host excluded), carrying that day's category + points. Everything below ties to this.
+        const perfDays = mergedSeries.filter(p => p.category && p.points && p.answers > 0).map(p => ({ ...p, category: canonCat(p.category) }));
         const catsPresent = [...new Set(perfDays.map(p => p.category))];
         const orderedCats = Object.keys(CAT).filter(c => catsPresent.includes(c)).concat(catsPresent.filter(c => !CAT[c]));
         const aggBy = (catFilter, ptFilter) => perfDays.reduce((o, p) => {
@@ -3152,6 +3159,16 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const diffRows = PT_TIERS.map(pt => { const a = aggBy("All", pt); return { pt, answered: a.answered, correct: a.correct, acc: a.answered ? Math.round((a.correct / a.answered) * 100) : null }; });
         const sel = aggBy(perfCat, perfDiff);
         const selAcc = sel.answered ? Math.round((sel.correct / sel.answered) * 100) : null;
+        // Overall + per-category accuracy, from the SAME submissions-based series as the chart,
+        // difficulty and cross-tab — so every % correct on this page ties out (host excluded).
+        const perfTotals = aggBy("All", "All");
+        const perfAccuracy = perfTotals.answered ? Math.round((perfTotals.correct / perfTotals.answered) * 100) : 0;
+        const catAgg = {};
+        perfDays.forEach(p => { const o = catAgg[p.category] || (catAgg[p.category] = { answered: 0, correct: 0 }); o.answered += p.answers; o.correct += p.correct; });
+        const catRows = Object.entries(catAgg).filter(([, v]) => v.answered > 0).map(([c, v]) => ({ c, acc: Math.round((v.correct / v.answered) * 100), answered: v.answered, correct: v.correct, time: catTime[c] && catTime[c].n ? Math.round(catTime[c].sum / catTime[c].n) : null })).sort((a, b) => a.acc - b.acc);
+        const toughest = catRows[0]; const easiest = catRows[catRows.length - 1];
+        // Recent-questions list — same submissions-based series (host excluded), time from logs.
+        const recent = perfDays.slice().sort((a, b) => b.date.localeCompare(a.date)).slice(0, 14).map(p => ({ date: p.date, category: p.category, answered: p.answers, correct: p.correct, acc: p.answers ? Math.round((p.correct / p.answers) * 100) : 0, time: byDate[p.date] && byDate[p.date].n ? Math.round(byDate[p.date].sum / byDate[p.date].n) : null }));
 
         const LineChart = ({ data, accessor, color, unit, yMin, yMax }) => {
           const W = 100, H = 100, PLOT = 130;
@@ -3494,7 +3511,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             ) : (
               <div>
                 <div style={{ display: "grid", gridTemplateColumns: "repeat(4,1fr)", gap: 8 }}>
-                  <Stat v={`${accuracy}%`} l="Overall accuracy" gold sub={`${totalCorrect.toLocaleString()}/${totalAnswers.toLocaleString()}`} />
+                  <Stat v={`${perfAccuracy}%`} l="Overall accuracy" gold sub={`${perfTotals.correct.toLocaleString()}/${perfTotals.answered.toLocaleString()}`} />
                   <Stat v={avgTime != null ? `${avgTime}s` : "—"} l="Avg answer time" />
                   <Stat v={toughest ? `${toughest.acc}%` : "—"} l="Toughest category" sub={toughest ? toughest.c : ""} />
                   <Stat v={easiest ? `${easiest.acc}%` : "—"} l="Easiest category" sub={easiest ? easiest.c : ""} />
