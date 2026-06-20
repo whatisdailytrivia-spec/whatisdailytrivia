@@ -290,6 +290,8 @@ const useIsMobile = () => {
 const CAT = {
   Finance: { bg: "rgba(201,168,76,0.12)", text: GOLD },
   "US Politics": { bg: "rgba(194,57,57,0.12)", text: "#C23939" },
+  "Sports & Entertainment": { bg: "rgba(100,149,237,0.12)", text: "#6495ED" },
+  "Sports & Ent.": { bg: "rgba(100,149,237,0.12)", text: "#6495ED" },
   Sports: { bg: "rgba(100,149,237,0.12)", text: "#6495ED" },
   Science: { bg: "rgba(147,112,219,0.12)", text: "#9370DB" },
   History: { bg: "rgba(205,133,63,0.12)", text: "#CD853F" },
@@ -2455,7 +2457,7 @@ function RulesTab() {
   const sched = [
     { d: "Mon", cat: "Finance",           c: GOLD },
     { d: "Tue", cat: "Science",           c: "#9370DB" },
-    { d: "Wed", cat: "Sports & Ent.",     c: "#6495ED" },
+    { d: "Wed", cat: "Sports & Entertainment", c: "#6495ED" },
     { d: "Thu", cat: "US Politics",       c: "#C23939" },
     { d: "Fri", cat: "History",           c: "#CD853F" },
     { d: "Sat", cat: "Music",             c: "#3FB950" },
@@ -2615,6 +2617,9 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [anaTab, setAnaTab]     = useState("accounts"); // analytics sub-tab: accounts | engagement | performance | location
   const [perfCat, setPerfCat]   = useState("All"); // category filter for difficulty cross-tab
   const [perfDiff, setPerfDiff] = useState("All"); // difficulty filter for cross-tab
+  const [perfRange, setPerfRange] = useState("all"); // daily-accuracy chart timeframe: today|yesterday|7d|30d|all
+  const [perfDate, setPerfDate]   = useState("");    // specific-date drill-down (YYYY-MM-DD)
+  const [perfDayInfo, setPerfDayInfo] = useState(null); // loaded archive detail for perfDate
   const [acctView, setAcctView] = useState(false);     // show the New Accounts page
   const [acctRange, setAcctRange] = useState("24h");   // 24h | 7d | all
   const [openTip, setOpenTip] = useState(null);        // key of the metric whose info note is open
@@ -2738,6 +2743,29 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     })();
     return () => { cancelled = true; };
   }, [adminUnlocked, todScope, todDate, analyticsSeries]);
+
+  // Performance drill-down: load the aired question + that day's tallies for the picked date.
+  useEffect(() => {
+    if (!adminUnlocked || !perfDate) { setPerfDayInfo(null); return; }
+    let alive = true;
+    (async () => {
+      const pt = (analyticsSeries || []).find(p => p.date === perfDate) || {};
+      let arc = {};
+      try { const r = await apiStorage.get(`archive:${perfDate}`); if (r) arc = JSON.parse(r.value); } catch (e) {}
+      if (!alive) return;
+      setPerfDayInfo({
+        date: perfDate,
+        answers: pt.answers || 0,
+        correct: pt.correct || 0,
+        category: arc.category || pt.category || null,
+        points: arc.points != null ? arc.points : (pt.points != null ? pt.points : null),
+        question: arc.question || null,
+        displayAnswer: arc.displayAnswer || arc.answer || null,
+        funFact: arc.funFact || null,
+      });
+    })();
+    return () => { alive = false; };
+  }, [adminUnlocked, perfDate, analyticsSeries]);
 
   const loadAdminData = async () => {
     try {
@@ -3125,10 +3153,10 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
         const sel = aggBy(perfCat, perfDiff);
         const selAcc = sel.answered ? Math.round((sel.correct / sel.answered) * 100) : null;
 
-        const LineChart = ({ data, accessor, color, unit }) => {
+        const LineChart = ({ data, accessor, color, unit, yMin, yMax }) => {
           const W = 100, H = 100, PLOT = 130;
           const pts = data.map(accessor);
-          const mx = Math.max(1, ...pts), mn = Math.min(0, ...pts);
+          const mx = yMax != null ? yMax : Math.max(1, ...pts), mn = yMin != null ? yMin : Math.min(0, ...pts);
           const n = pts.length;
           const X = (i) => n <= 1 ? 0 : (i / (n - 1)) * W;
           const Y = (v) => H - ((v - mn) / ((mx - mn) || 1)) * H;
@@ -3472,7 +3500,76 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                   <Stat v={easiest ? `${easiest.acc}%` : "—"} l="Easiest category" sub={easiest ? easiest.c : ""} />
                 </div>
                 <div style={{ marginTop: 10 }}>
-                  <Trend title="Daily accuracy · full history" color="#6495ED" accessor={p => p.answers ? Math.round((p.correct / p.answers) * 100) : 0} unit="%" yLabel="Accuracy" last={`${accuracy}% all-time`} />
+                  {(() => {
+                    const RANGES = [["today", "Today"], ["yesterday", "Yesterday"], ["7d", "7 Days"], ["30d", "30 Days"], ["all", "All"]];
+                    const accOf = p => p.answers ? Math.round((p.correct / p.answers) * 100) : 0;
+                    const allDays = mergedSeries.filter(p => p.answers > 0);
+                    const yk = prevDayKey(today);
+                    let chartData = allDays;
+                    if (perfRange === "today") chartData = allDays.filter(p => p.date === today);
+                    else if (perfRange === "yesterday") chartData = allDays.filter(p => p.date === yk);
+                    else if (perfRange === "7d") chartData = allDays.slice(-7);
+                    else if (perfRange === "30d") chartData = allDays.slice(-30);
+                    const ra = chartData.reduce((s, p) => s + p.answers, 0), rc = chartData.reduce((s, p) => s + p.correct, 0);
+                    const rangeAcc = ra ? Math.round((rc / ra) * 100) : null;
+                    const tickIdx = chartData.length <= 1 ? [0] : [0, Math.floor((chartData.length - 1) / 2), chartData.length - 1];
+                    const selSty = { background: SURFACE2, color: OFF_WHITE, border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "6px 10px", fontFamily: SANS, fontSize: "0.72rem", cursor: "pointer", maxWidth: "100%" };
+                    return (
+                      <div style={panel}>
+                        <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", flexWrap: "wrap", gap: 8 }}>
+                          <div style={chartTitle}>Daily accuracy</div>
+                          <div style={{ ...s.mono, fontSize: "0.7rem", color: "#6495ED", fontWeight: 600 }}>{rangeAcc != null ? `${rangeAcc}% ${perfRange === "all" ? "all-time" : "in range"}` : "no data"}</div>
+                        </div>
+                        <div style={{ display: "flex", flexWrap: "wrap", gap: 5, margin: "10px 0 2px" }}>
+                          {RANGES.map(([k, l]) => { const on = perfRange === k; return (
+                            <button key={k} onClick={() => setPerfRange(k)} style={{ padding: "4px 11px", borderRadius: 100, fontSize: "0.68rem", cursor: "pointer", fontFamily: SANS, border: `1px solid ${on ? "#6495ED" : SURFACE3}`, background: on ? "rgba(100,149,237,0.16)" : "transparent", color: on ? "#6495ED" : TEXT_SEC }}>{l}</button>
+                          ); })}
+                        </div>
+                        {chartData.length >= 2 ? (
+                          <>
+                            <div style={{ ...s.mono, fontSize: "0.5rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.07em", marginTop: 9, marginBottom: 1 }}>Accuracy (%)</div>
+                            <LineChart data={chartData} accessor={accOf} color="#6495ED" unit="%" yMin={0} yMax={100} />
+                            <div style={{ display: "flex", justifyContent: "space-between", marginTop: 5, paddingLeft: 34 }}>
+                              {tickIdx.map((ix, i) => <span key={i} style={{ ...s.mono, fontSize: "0.53rem", color: TEXT_MUTED }}>{fmtDate(chartData[ix]?.date)}</span>)}
+                            </div>
+                          </>
+                        ) : chartData.length === 1 ? (
+                          <div style={{ ...s.mono, fontSize: "0.74rem", color: TEXT_SEC, padding: "16px 0 6px" }}>{fmtDate(chartData[0].date)}: <span style={{ color: accColor(accOf(chartData[0])), fontWeight: 700 }}>{accOf(chartData[0])}%</span> · {chartData[0].correct}/{chartData[0].answers} correct</div>
+                        ) : (
+                          <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, padding: "16px 0 6px" }}>No answers recorded in this range yet.</div>
+                        )}
+                        <div style={{ marginTop: 16, paddingTop: 14, borderTop: `1px solid ${SURFACE3}` }}>
+                          <div style={{ ...s.mono, fontSize: "0.57rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 7 }}>Look up a specific date</div>
+                          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+                            <select value={perfDate} onChange={e => setPerfDate(e.target.value)} style={selSty}>
+                              <option value="">Select a date…</option>
+                              {allDays.slice().reverse().map(p => <option key={p.date} value={p.date}>{fmtDate(p.date)} — {p.category || "?"}</option>)}
+                            </select>
+                            {perfDate && perfDayInfo && (perfDayInfo.question || perfDayInfo.displayAnswer) && (
+                              <select value="q0" onChange={() => {}} style={selSty} title="Question from this date">
+                                <option value="q0">{perfDayInfo.displayAnswer ? `✓ ${perfDayInfo.displayAnswer}` : "View question"}</option>
+                              </select>
+                            )}
+                          </div>
+                          {perfDate && perfDayInfo && (
+                            <div style={{ marginTop: 10, background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "13px 15px" }}>
+                              <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap", marginBottom: 8 }}>
+                                <span style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED }}>{fmtDate(perfDayInfo.date)}</span>
+                                {perfDayInfo.category && <span style={{ ...s.badge, background: (CAT[perfDayInfo.category] || CAT.Wildcard).bg, color: (CAT[perfDayInfo.category] || CAT.Wildcard).text, borderRadius: 4, padding: "2px 7px", fontSize: "0.64rem" }}>{perfDayInfo.category}</span>}
+                                {perfDayInfo.points != null && <span style={{ ...s.mono, fontSize: "0.62rem", color: PT_COLOR[perfDayInfo.points] || GOLD }}>{PT_LABEL[perfDayInfo.points] || ""} · {perfDayInfo.points}pts</span>}
+                                <span style={{ ...s.mono, fontSize: "0.74rem", fontWeight: 700, marginLeft: "auto", color: accColor(perfDayInfo.answers ? Math.round(perfDayInfo.correct / perfDayInfo.answers * 100) : 0) }}>{perfDayInfo.answers ? Math.round(perfDayInfo.correct / perfDayInfo.answers * 100) : 0}% · {perfDayInfo.correct}/{perfDayInfo.answers}</span>
+                              </div>
+                              {perfDayInfo.question
+                                ? <div style={{ fontSize: "0.84rem", color: OFF_WHITE, lineHeight: 1.6, marginBottom: 7 }}>{perfDayInfo.question}</div>
+                                : <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginBottom: 4 }}>Question text wasn't archived for this date.</div>}
+                              {perfDayInfo.displayAnswer && <div style={{ ...s.mono, fontSize: "0.73rem", color: GOLD }}>✓ {perfDayInfo.displayAnswer}</div>}
+                            </div>
+                          )}
+                          {perfDate && !perfDayInfo && <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginTop: 8 }}>Loading…</div>}
+                        </div>
+                      </div>
+                    );
+                  })()}
                 </div>
                 <div style={subTitle}>Accuracy by category</div>
                 <div style={{ background: SURFACE, border: `1px solid ${SURFACE3}`, borderRadius: 8, padding: "14px 15px" }}>
