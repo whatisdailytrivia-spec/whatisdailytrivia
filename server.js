@@ -297,14 +297,27 @@ app.get("/api/storage/:key", async (req, res) => {
 // Blocking them here closes the open-write hole on /api/storage that would otherwise
 // let a crafted request overwrite a credential (account takeover), forge a past
 // monthly winner, or tamper with the analytics anchor.
-const NO_CLIENT_WRITE = ["cred:", "halloffame:", "launch_date"];
+// Write guard for the public endpoints (/api/storage, /api/merge, /api/upsert, /api/append).
+// HARD_BLOCK keys are server-authoritative — only /api/grade and /api/regrade write them
+// (directly, bypassing these endpoints), so the public endpoints must never accept them.
+// ADMIN_ONLY keys require the admin secret (question banks, published questions, archive,
+// analytics cache, submission resets). Everything else (users profile, group blobs,
+// contact, start) stays open. This closes the score/leaderboard-tampering hole.
+const HARD_BLOCK_WRITE = ["cred:", "halloffame:", "launch_date", "leaderboard:", "history:"];
+const ADMIN_ONLY_WRITE = ["question:", "question_bank", "archive", "analytics_series", "submissions:", "sub_reset:", "qoverride:"];
+const _wpfx = (key, list) => list.some((pre) => key === pre || key.indexOf(pre) === 0);
+const writeCheck = (key, body) => {
+  if (_wpfx(key, HARD_BLOCK_WRITE)) return { ok: false, error: "Protected key" };
+  if (_wpfx(key, ADMIN_ONLY_WRITE)) return (body && body.adminPassword === ADMIN_PASSWORD) ? { ok: true } : { ok: false, error: "Admin auth required" };
+  return { ok: true };
+};
 
 app.post("/api/storage", async (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key) return res.status(400).json({ error: "key is required" });
-    if (NO_CLIENT_WRITE.some((pre) => key === pre || key.indexOf(pre) === 0))
-      return res.status(403).json({ error: "Protected key" });
+    const chk = writeCheck(key, req.body);
+    if (!chk.ok) return res.status(403).json({ error: chk.error });
     await dbSet(key, value);
     res.json({ key, value });
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -414,6 +427,8 @@ app.post("/api/merge", async (req, res) => {
   try {
     const { key, field, value, mode } = req.body;
     if (!key || field == null) return res.status(400).json({ error: "key and field required" });
+    const chk = writeCheck(key, req.body);
+    if (!chk.ok) return res.status(403).json({ error: chk.error });
     const valJson = mode === "del" ? "null" : JSON.stringify(value == null ? null : value);
     res.json(await evalJson(OBJ_MERGE_LUA, key, [String(field), valJson, mode || "set"]));
   } catch (e) { res.status(500).json({ error: e.message }); }
@@ -424,6 +439,8 @@ app.post("/api/upsert", async (req, res) => {
   try {
     const { key, username, entry } = req.body;
     if (!key || !username || !entry) return res.status(400).json({ error: "key, username, entry required" });
+    const chk = writeCheck(key, req.body);
+    if (!chk.ok) return res.status(403).json({ error: chk.error });
     res.json(await evalJson(ARR_UPSERT_LUA, key, [String(username), JSON.stringify(entry)]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });
@@ -433,6 +450,8 @@ app.post("/api/append", async (req, res) => {
   try {
     const { key, value } = req.body;
     if (!key || value == null) return res.status(400).json({ error: "key and value required" });
+    const chk = writeCheck(key, req.body);
+    if (!chk.ok) return res.status(403).json({ error: chk.error });
     res.json(await evalJson(ARR_APPEND_LUA, key, [String(value)]));
   } catch (e) { res.status(500).json({ error: e.message }); }
 });

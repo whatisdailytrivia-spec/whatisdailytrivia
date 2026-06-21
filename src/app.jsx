@@ -25,6 +25,10 @@ function CountryMap({ numericCode, caption }) {
   );
 }
 
+// Set once the admin unlocks; auto-attached to writes so admin-gated keys (question banks,
+// analytics cache, submission resets) pass the server's write guard. Empty for normal users.
+let __adminSecret = "";
+
 const apiStorage = {
   get: async (key) => {
     const res = await fetch(`/api/storage/${encodeURIComponent(key)}`);
@@ -35,7 +39,7 @@ const apiStorage = {
     const res = await fetch("/api/storage", {
       method: "POST",
       headers: { "Content-Type": "application/json" },
-      body: JSON.stringify({ key, value }),
+      body: JSON.stringify({ key, value, adminPassword: __adminSecret }),
     });
     return res.json();
   },
@@ -71,7 +75,7 @@ const mergeWrite = async (key, mutate, fallback) => {
 // Race-free write via the server's atomic Redis routes. Throws on any failure so
 // callers fall back to the mergeWrite path above — the app keeps working either way.
 const atomicPost = async (path, body) => {
-  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify(body) });
+  const res = await fetch(path, { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ ...body, adminPassword: __adminSecret }) });
   if (!res.ok) throw new Error(`${path} ${res.status}`);
   return res.json();
 };
@@ -2900,7 +2904,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   };
 
   const unlock = () => {
-    if (pw === ADMIN_PASSWORD) { setAdminUnlocked(true); setPwErr(""); }
+    if (pw === ADMIN_PASSWORD) { __adminSecret = pw; setAdminUnlocked(true); setPwErr(""); }
     else setPwErr("Incorrect password.");
   };
 
