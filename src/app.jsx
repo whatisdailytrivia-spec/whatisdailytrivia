@@ -688,6 +688,19 @@ export default function App() {
 function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ fullName: "", username: "", email: "", password: "", state: "" });
+  const [nameInput, setNameInput] = useState("");          // returning-user "add your name" prompt
+  const [nameHidden, setNameHidden] = useState(false);
+  const [nameSaving, setNameSaving] = useState(false);
+  const saveMyName = async () => {
+    const fn = nameInput.trim();
+    if (fn.split(/\s+/).filter(Boolean).length < 2 || nameSaving) return;
+    setNameSaving(true);
+    const dn = publicNameFrom(fn);
+    const nu = { ...user, fullName: fn, displayName: dn };
+    setUser(nu); localStorage.setItem("whatis_user", JSON.stringify(nu));
+    try { await saveUser(user.username, { fullName: fn, displayName: dn }); } catch (e) {}
+    setNameSaving(false);
+  };
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -1039,6 +1052,18 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
 
   return (
     <div>
+      {/* ── One-time "add your real name" prompt (accounts created before the name field) ── */}
+      {user && !user.fullName && !nameHidden && (
+        <div style={{ background: "rgba(201,168,76,0.07)", border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ fontWeight: 600, fontSize: "0.9rem", color: GOLD, marginBottom: 3 }}>Add your name</div>
+          <div style={{ fontSize: "0.78rem", color: TEXT_SEC, marginBottom: 10 }}>Help us know who's playing — enter your first and last name. Only "{nameInput.trim() ? publicNameFrom(nameInput) : "First L."}" is shown publicly.</div>
+          <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
+            <input style={{ ...s.input, flex: 1, minWidth: 180 }} placeholder="First Last" value={nameInput} onChange={e => setNameInput(e.target.value)} onKeyDown={e => e.key === "Enter" && saveMyName()} />
+            <button style={{ ...s.btn, opacity: nameInput.trim().split(/\s+/).filter(Boolean).length < 2 ? 0.5 : 1 }} onClick={saveMyName}>{nameSaving ? "Saving…" : "Save"}</button>
+            <button style={{ ...s.btnSec }} onClick={() => setNameHidden(true)}>Later</button>
+          </div>
+        </div>
+      )}
       {/* ── Header ────────────────────────────────────── */}
       <div style={{ display: "flex", alignItems: "flex-start", justifyContent: "space-between", marginBottom: 18 }}>
         <div>
@@ -3976,6 +4001,13 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                         {["AL","AK","AZ","AR","CA","CO","CT","DE","FL","GA","HI","ID","IL","IN","IA","KS","KY","LA","ME","MD","MA","MI","MN","MS","MO","MT","NE","NV","NH","NJ","NM","NY","NC","ND","OH","OK","OR","PA","RI","SC","SD","TN","TX","UT","VT","VA","WA","WV","WI","WY","DC"].map(st => <option key={st} value={st}>{st}</option>)}
                       </select>
                     </div>
+                  </div>
+                  <div style={{ marginBottom: 12 }}>
+                    <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 4,
+                      textTransform: "uppercase", letterSpacing: "0.08em" }}>Full name <span style={{ color: TEXT_MUTED, opacity: 0.7 }}>(admin-only)</span></div>
+                    <input style={s.input} value={editForm.fullName || ""} placeholder="First Last"
+                      onChange={e => setEditForm({ ...editForm, fullName: e.target.value })} />
+                    <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 4 }}>The player's real name. Private — never shown publicly.</div>
                   </div>
                   <div style={{ marginBottom: 12 }}>
                     <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, marginBottom: 4,
