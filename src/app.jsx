@@ -2716,6 +2716,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [userSaved, setUserSaved] = useState(false);
   const [pwReset, setPwReset] = useState("");
   const [pwResetMsg, setPwResetMsg] = useState("");
+  const [verifyMsg, setVerifyMsg] = useState("");
   const [userSearch, setUserSearch] = useState("");
   const [userSort, setUserSort]   = useState("newest"); // newest | oldest | alpha
   const [backingUp, setBackingUp] = useState(false);
@@ -4211,6 +4212,21 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                       }}>Set</button>
                     </div>
                     {pwResetMsg && <div style={{ fontSize: "0.78rem", color: pwResetMsg.startsWith("done:") ? "#4CAF7D" : "#E05C5C", marginTop: 8, lineHeight: 1.5, wordBreak: "break-word" }}>{pwResetMsg.replace(/^(done:|err:)/, "")}</div>}
+                  </div>
+                  <div style={{ marginTop: 12, paddingTop: 12, borderTop: `1px solid ${SURFACE3}` }}>
+                    <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 6 }}>Email verification</div>
+                    <div style={{ display: "flex", gap: 8, alignItems: "center", flexWrap: "wrap" }}>
+                      <span style={{ ...s.badge, background: u.emailVerified ? "rgba(76,175,125,0.12)" : SURFACE2, color: u.emailVerified ? "#4CAF7D" : TEXT_MUTED, border: `1px solid ${u.emailVerified ? "rgba(76,175,125,0.3)" : SURFACE3}` }}>{u.emailVerified ? "✓ Verified" : "Not verified"}</span>
+                      <button style={{ ...s.btnSec, fontSize: "0.74rem", whiteSpace: "nowrap" }} onClick={async () => {
+                        setVerifyMsg("sending:Sending…");
+                        try {
+                          const r = await atomicPost("/api/send-verify", { adminPassword: ADMIN_PASSWORD, username: u.username });
+                          if (r && r.ok) setVerifyMsg(`done:Verification email sent to ${r.sentTo}.`);
+                          else setVerifyMsg(`err:${r && r.error === "no_provider" ? "No email provider connected yet — add RESEND_API_KEY in Render." : r && r.error === "no_email" ? "No email on file for this user." : "Couldn't send — " + ((r && r.error) || "try again") + "."}`);
+                        } catch (e) { setVerifyMsg("err:Couldn't reach the server. Try again."); }
+                      }}>Send verification email</button>
+                    </div>
+                    {verifyMsg && <div style={{ fontSize: "0.78rem", color: verifyMsg.startsWith("done:") ? "#4CAF7D" : verifyMsg.startsWith("sending:") ? TEXT_SEC : "#E05C5C", marginTop: 8, lineHeight: 1.5, wordBreak: "break-word" }}>{verifyMsg.replace(/^(done:|err:|sending:)/, "")}</div>}
                   </div>
                   {userSaved && <div style={{ color: "#4CAF7D", fontSize: "0.8rem", marginTop: 7, textAlign: "center" }}>✓ Saved</div>}
                 </div>

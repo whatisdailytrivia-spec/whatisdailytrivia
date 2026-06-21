@@ -882,6 +882,62 @@ app.get("/story/:name", async (req, res) => {
   } catch (e) { res.status(500).end(); }
 });
 
+// ── Email verification via Resend ────────────────────────────────────────────
+// Needs env vars: RESEND_API_KEY (required), EMAIL_FROM (a verified sender, e.g.
+// "WhatIs Daily Trivia <verify@yourdomain.com>"), APP_URL (defaults to the live URL).
+// Until RESEND_API_KEY is set, sends no-op with {error:"no_provider"} — safe to deploy.
+const RESEND_API_KEY = process.env.RESEND_API_KEY;
+const EMAIL_FROM = process.env.EMAIL_FROM || "WhatIs Daily Trivia <onboarding@resend.dev>";
+const APP_URL = process.env.APP_URL || "https://whatisdailytrivia.onrender.com";
+async function sendEmail(to, subject, html) {
+  if (!RESEND_API_KEY) return { ok: false, error: "no_provider" };
+  try {
+    const r = await fetch("https://api.resend.com/emails", {
+      method: "POST",
+      headers: { Authorization: `Bearer ${RESEND_API_KEY}`, "Content-Type": "application/json" },
+      body: JSON.stringify({ from: EMAIL_FROM, to: [to], subject, html }),
+    });
+    const data = await r.json().catch(() => ({}));
+    if (!r.ok) return { ok: false, error: data.message || `resend_${r.status}` };
+    return { ok: true, id: data.id };
+  } catch (e) { return { ok: false, error: e.message }; }
+}
+
+// Admin-triggered: email a verification link to a user's address on file.
+app.post("/api/send-verify", async (req, res) => {
+  try {
+    const { adminPassword, username } = req.body;
+    if (adminPassword !== ADMIN_PASSWORD) return res.status(403).json({ ok: false, error: "forbidden" });
+    if (!username) return res.status(400).json({ ok: false, error: "username required" });
+    const usersRaw = await dbGet("users");
+    const rec = (usersRaw ? JSON.parse(usersRaw) : {})[username];
+    if (!rec || !rec.email) return res.json({ ok: false, error: "no_email" });
+    const token = crypto.randomBytes(24).toString("hex");
+    await redis(["SET", `everify:${token}`, JSON.stringify({ username, email: rec.email }), "EX", "172800"]);
+    const first = rec.fullName ? " " + String(rec.fullName).split(/\s+/)[0] : "";
+    const link = `${APP_URL}/verify-email?token=${token}`;
+    const html = `<div style="font-family:Arial,sans-serif;max-width:480px;margin:0 auto;color:#222"><h2>Verify your email</h2><p>Hi${first}, please confirm this is your email for <b>WhatIs... Daily Trivia</b> — it's how we'll reach you if you win the monthly prize.</p><p style="margin:22px 0"><a href="${link}" style="display:inline-block;background:#C9A84C;color:#111;padding:13px 24px;border-radius:8px;text-decoration:none;font-weight:bold">Verify my email</a></p><p style="color:#888;font-size:12px">Or paste this link into your browser:<br>${link}</p></div>`;
+    const sent = await sendEmail(rec.email, "Verify your email — WhatIs... Daily Trivia", html);
+    if (!sent.ok) return res.json({ ok: false, error: sent.error });
+    res.json({ ok: true, sentTo: rec.email });
+  } catch (e) { res.status(500).json({ error: e.message }); }
+});
+
+// Click target inside the email — verifies the token and marks the account.
+app.get("/verify-email", async (req, res) => {
+  const token = String(req.query.token || "");
+  const page = (ok, title, body) => `<!doctype html><html><head><meta name="viewport" content="width=device-width,initial-scale=1"><title>${title}</title></head><body style="margin:0;font-family:Arial,sans-serif;background:#08080B;color:#F5F3EE;display:flex;min-height:92vh;align-items:center;justify-content:center;text-align:center"><div style="max-width:420px;padding:24px"><div style="font-size:2.4rem">${ok ? "✅" : "⚠️"}</div><h2 style="color:${ok ? "#4CAF7D" : "#E05C5C"}">${title}</h2><p style="color:#C9C3B6;line-height:1.5">${body}</p><a href="${APP_URL}" style="color:#C9A84C;text-decoration:none">← Back to WhatIs...</a></div></body></html>`;
+  try {
+    if (!token) return res.status(400).send(page(false, "Invalid link", "This verification link is missing its token."));
+    const raw = await dbGet(`everify:${token}`);
+    if (!raw) return res.status(400).send(page(false, "Link expired", "This link is invalid or has already been used."));
+    const { username } = JSON.parse(raw);
+    await evalJson(OBJ_MERGE_LUA, "users", [String(username), JSON.stringify({ emailVerified: true, emailVerifiedAt: Date.now() }), "merge"]);
+    await dbDelete(`everify:${token}`);
+    res.send(page(true, "Email Verified", "Thanks — your email is confirmed. You're all set."));
+  } catch (e) { res.status(500).send(page(false, "Something went wrong", "Please try again in a moment.")); }
+});
+
 app.get("*", (req, res) => {
   res.sendFile(path.join(__dirname, "build", "index.html"));
 });
