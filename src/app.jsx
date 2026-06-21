@@ -1281,7 +1281,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               {(sub?.funFact || revealFact) && (
                 <div style={{ marginTop: 12, padding: "12px 16px", background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.28)", borderRadius: 8 }}>
                   <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, letterSpacing: "0.08em", marginBottom: 6 }}>Fun Fact</div>
-                  <div style={{ fontSize: "0.95rem", color: TEXT_SEC, lineHeight: 1.5 }}>{sub?.funFact || revealFact}</div>
+                  <div style={{ fontSize: "0.95rem", color: TEXT_SEC, lineHeight: 1.5, whiteSpace: "pre-line" }}>{sub?.funFact || revealFact}</div>
                 </div>
               )}
               <div style={{ marginTop: 12, textAlign: "center", ...s.mono, fontSize: "0.72rem", color: TEXT_MUTED }}>
