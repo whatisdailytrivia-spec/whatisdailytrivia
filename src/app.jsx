@@ -257,6 +257,11 @@ const etDateStr = () => new Intl.DateTimeFormat("en-CA", { timeZone: "America/Ne
 const localDateStr = () => new Intl.DateTimeFormat("en-CA", { year: "numeric", month: "2-digit", day: "2-digit" }).format(new Date());
 const todayKey = () => localDateStr();
 const monthKey = () => localDateStr().slice(0, 7);
+// The previous calendar month as YYYY-MM (the month a winner is crowned for).
+const prevMonthKey = () => { const d = new Date(); d.setDate(1); d.setMonth(d.getMonth() - 1); return `${d.getFullYear()}-${String(d.getMonth() + 1).padStart(2, "0")}`; };
+const monthLabel = (mk) => { const [y, m] = mk.split("-").map(Number); return new Date(y, m - 1, 1).toLocaleString("default", { month: "long", year: "numeric" }); };
+// The winning entry from an archived leaderboard array = highest points, host/excluded skipped.
+const winnerOf = (lb) => (Array.isArray(lb) ? lb.filter(e => e && !isExcludedUser(e.username)).sort((a, b) => (b.points || 0) - (a.points || 0))[0] : null);
 // Local YYYY-MM-DD minus one day.
 const prevDayKey = (k) => { const [y, m, d] = k.split("-").map(Number); const dt = new Date(y, m - 1, d - 1); const p = (n) => String(n).padStart(2, "0"); return `${dt.getFullYear()}-${p(dt.getMonth() + 1)}-${p(dt.getDate())}`; };
 // A streak is "live" only while the player answered today or yesterday (local).
@@ -701,6 +706,43 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     try { await saveUser(user.username, { fullName: fn, displayName: dn }); } catch (e) {}
     setNameSaving(false);
   };
+  // ── Month-end winner prize claim ──────────────────────────────────────────
+  const [winClaim, setWinClaim] = useState(null);   // { month, label, claimed } if user won the previous month
+  const [igInput, setIgInput] = useState("");
+  const [claimEmail, setClaimEmail] = useState("");
+  const [claimNote, setClaimNote] = useState("");
+  const [claimBusy, setClaimBusy] = useState(false);
+  useEffect(() => {
+    if (!user) { setWinClaim(null); return; }
+    let alive = true;
+    (async () => {
+      const mk = prevMonthKey();
+      try {
+        const hofR = await apiStorage.get(`halloffame:${mk}`).catch(() => null);
+        if (!hofR) return;
+        const win = winnerOf(JSON.parse(hofR.value));
+        if (!win || win.username !== user.username) return;
+        let claim = null;
+        try { const cR = await apiStorage.get(`claim:${mk}`); if (cR) claim = JSON.parse(cR.value); } catch (e) {}
+        if (!alive) return;
+        setClaimEmail(user.email || "");
+        setIgInput((claim && claim.instagram) || "");
+        setWinClaim({ month: mk, label: monthLabel(mk), claimed: !!(claim && claim.claimedAt) });
+      } catch (e) {}
+    })();
+    return () => { alive = false; };
+  }, [user]);
+  const submitClaim = async () => {
+    if (claimBusy || !winClaim) return;
+    const ig = igInput.trim().replace(/^@+/, "");
+    const em = (claimEmail || user.email || "").trim();
+    if (!ig || !/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(em)) return;
+    setClaimBusy(true);
+    const rec = { username: user.username, fullName: user.fullName || "", email: em, instagram: ig, note: claimNote.trim(), claimedAt: Date.now(), emailVerified: false, prizePaid: false };
+    try { await apiStorage.set(`claim:${winClaim.month}`, JSON.stringify(rec)); } catch (e) {}
+    setWinClaim({ ...winClaim, claimed: true });
+    setClaimBusy(false);
+  };
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -1052,6 +1094,28 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
 
   return (
     <div>
+      {/* ── Month-end winner: claim your prize ─────────────────────────────── */}
+      {winClaim && (
+        <div style={{ background: "rgba(255,215,0,0.07)", border: "1px solid rgba(255,215,0,0.35)", borderRadius: 10, padding: "16px 18px", marginBottom: 16 }}>
+          {winClaim.claimed ? (
+            <>
+              <div style={{ fontWeight: 700, fontSize: "1rem", color: "#FFD700", marginBottom: 4 }}>🏆 Prize claim received — {winClaim.label}</div>
+              <div style={{ fontSize: "0.82rem", color: TEXT_SEC }}>Thanks! We have your details and will reach out to get you your prize.</div>
+            </>
+          ) : (
+            <>
+              <div style={{ fontWeight: 700, fontSize: "1.05rem", color: "#FFD700", marginBottom: 3 }}>🏆 You won {winClaim.label}!</div>
+              <div style={{ fontSize: "0.82rem", color: TEXT_SEC, marginBottom: 12 }}>Confirm your details to claim your prize — we'll use these to verify you and get it to you.</div>
+              <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+                <input style={s.input} type="email" placeholder="Email" value={claimEmail} onChange={e => setClaimEmail(e.target.value)} />
+                <input style={s.input} placeholder="Instagram handle (e.g. @yourname)" value={igInput} onChange={e => setIgInput(e.target.value)} />
+                <input style={s.input} placeholder="Anything we should know? (optional)" value={claimNote} onChange={e => setClaimNote(e.target.value)} />
+                <button style={{ ...s.btn, opacity: (igInput.trim() && claimEmail.trim()) ? 1 : 0.5 }} onClick={submitClaim}>{claimBusy ? "Submitting…" : "Claim my prize"}</button>
+              </div>
+            </>
+          )}
+        </div>
+      )}
       {/* ── One-time "add your real name" prompt (accounts created before the name field) ── */}
       {user && !user.fullName && !nameHidden && (
         <div style={{ background: "rgba(201,168,76,0.07)", border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
@@ -2633,6 +2697,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
   const [pw, setPw]             = useState("");
   const [pwErr, setPwErr]       = useState("");
   const [section, setSection]   = useState("analytics");
+  const [winnerData, setWinnerData] = useState(null); // [{month,label,winner,claim}] for the Winners verification panel
   const [previewCat, setPreviewCat] = useState("All"); // category filter for Running Questions List
   const [adminGroups, setAdminGroups] = useState(null); // all groups (admin manager)
   const [delGroupCode, setDelGroupCode] = useState(null); // group pending delete confirm
@@ -2808,6 +2873,34 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     })();
     return () => { alive = false; };
   }, [adminUnlocked, perfDate, analyticsSeries]);
+
+  // Winners verification panel: load each completed month's winner + their prize claim.
+  useEffect(() => {
+    if (!adminUnlocked || section !== "winners" || winnerData !== null) return;
+    let alive = true;
+    (async () => {
+      try {
+        const keys = await apiStorage.list("halloffame:");
+        const list = (keys && keys.keys) ? [...keys.keys].sort((a, b) => b.localeCompare(a)) : [];
+        const out = [];
+        for (const k of list) {
+          const mk = k.replace("halloffame:", "");
+          let win = null, claim = null;
+          try { const r = await apiStorage.get(k); if (r) win = winnerOf(JSON.parse(r.value)); } catch (e) {}
+          try { const c = await apiStorage.get(`claim:${mk}`); if (c) claim = JSON.parse(c.value); } catch (e) {}
+          out.push({ month: mk, label: monthLabel(mk), winner: win, claim });
+        }
+        if (alive) setWinnerData(out);
+      } catch (e) { if (alive) setWinnerData([]); }
+    })();
+    return () => { alive = false; };
+  }, [adminUnlocked, section, winnerData]);
+  const setClaimFlag = async (mk, patch) => {
+    const cur = ((winnerData || []).find(w => w.month === mk) || {}).claim || {};
+    const next = { ...cur, ...patch };
+    await apiStorage.set(`claim:${mk}`, JSON.stringify(next));
+    setWinnerData(prev => (prev || []).map(w => w.month === mk ? { ...w, claim: next } : w));
+  };
 
   const loadAdminData = async () => {
     try {
@@ -3048,7 +3141,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
     <div>
       <div style={s.label}>Admin Panel</div>
       <div style={{ display: "flex", gap: 5, marginBottom: 22, flexWrap: "wrap" }}>
-        {[["analytics","📊 Analytics"],["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"],["groups","🗂 Groups"]].map(([k, l]) => (
+        {[["analytics","📊 Analytics"],["questions","📤 Question Upload"],["scheduler","📅 Today/Tomorrow"],["preview","📋 Running Questions List"],["users","👥 Users"],["winners","🏆 Winners"],["groups","🗂 Groups"]].map(([k, l]) => (
           <button key={k} onClick={() => setSection(k)}
             style={{ padding: "7px 12px", borderRadius: 6,
               border: section === k ? `1px solid ${GOLD}` : `1px solid ${SURFACE3}`,
@@ -4125,6 +4218,45 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
             </div>
           ));
           })()}
+        </div>
+      )}
+
+      {/* ── WINNERS (verify + deliver prize) ─────────────────────────────── */}
+      {section === "winners" && (
+        <div>
+          <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginBottom: 14, lineHeight: 1.6 }}>Verify each month's winner — confirm their email + Instagram, then mark the prize delivered. Details arrive when the winner taps "Claim my prize" on their play screen. (Note: in-app email verification activates once an email provider is connected; for now the winner self-confirms.)</div>
+          {winnerData === null ? (
+            <div style={{ color: TEXT_MUTED, textAlign: "center", padding: "30px 0", fontSize: "0.85rem" }}>Loading…</div>
+          ) : winnerData.length === 0 ? (
+            <div style={{ ...s.card, textAlign: "center", padding: "36px" }}><div style={{ fontSize: "1.6rem", marginBottom: 10 }}>🏆</div><div style={{ color: TEXT_MUTED, fontSize: "0.85rem" }}>No completed months yet. The first winner appears after the month-end archive (July 1).</div></div>
+          ) : winnerData.map(({ month, label, winner, claim }) => {
+            const u = winner ? (adminUsers[winner.username] || {}) : {};
+            const claimed = !!(claim && claim.claimedAt);
+            return (
+              <div key={month} style={{ ...s.card, padding: "14px 16px", marginBottom: 12 }}>
+                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "baseline", marginBottom: 8 }}>
+                  <div style={{ fontFamily: SERIF, fontSize: "1rem", fontWeight: 700, color: OFF_WHITE }}>{label}</div>
+                  <div style={{ ...s.mono, fontSize: "0.7rem", color: GOLD }}>{winner ? `${winner.points} pts` : "—"}</div>
+                </div>
+                {!winner ? <div style={{ color: TEXT_MUTED, fontSize: "0.8rem" }}>No eligible winner.</div> : (
+                  <>
+                    <div style={{ fontWeight: 600, fontSize: "0.9rem", color: OFF_WHITE }}>{winner.username}{u.fullName ? <span style={{ color: TEXT_MUTED, fontWeight: 400 }}> · {u.fullName}</span> : null}</div>
+                    <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_SEC, marginTop: 4, lineHeight: 1.8 }}>
+                      Account email: {u.email || "—"}<br />
+                      Claimed email: {(claim && claim.email) || "—"}<br />
+                      Instagram: {(claim && claim.instagram) ? `@${claim.instagram}` : "— (not provided)"}
+                    </div>
+                    {claim && claim.note ? <div style={{ fontSize: "0.78rem", color: TEXT_SEC, marginTop: 6, fontStyle: "italic" }}>"{claim.note}"</div> : null}
+                    <div style={{ marginTop: 11, display: "flex", gap: 8, flexWrap: "wrap", alignItems: "center" }}>
+                      <span style={{ ...s.badge, background: claimed ? "rgba(76,175,125,0.12)" : SURFACE2, color: claimed ? "#4CAF7D" : TEXT_MUTED, border: `1px solid ${claimed ? "rgba(76,175,125,0.3)" : SURFACE3}` }}>{claimed ? "✓ Claimed" : "Awaiting claim"}</span>
+                      <button onClick={() => setClaimFlag(month, { emailVerified: !(claim && claim.emailVerified) })} style={{ ...s.btnSec, fontSize: "0.72rem", border: `1px solid ${(claim && claim.emailVerified) ? "rgba(76,175,125,0.4)" : SURFACE3}`, color: (claim && claim.emailVerified) ? "#4CAF7D" : TEXT_SEC }}>{(claim && claim.emailVerified) ? "✓ Email verified" : "Mark email verified"}</button>
+                      <button onClick={() => setClaimFlag(month, { prizePaid: !(claim && claim.prizePaid) })} style={{ ...s.btnSec, fontSize: "0.72rem", border: `1px solid ${(claim && claim.prizePaid) ? "rgba(201,168,76,0.5)" : SURFACE3}`, color: (claim && claim.prizePaid) ? GOLD : TEXT_SEC }}>{(claim && claim.prizePaid) ? "✓ Prize delivered" : "Mark prize delivered"}</button>
+                    </div>
+                  </>
+                )}
+              </div>
+            );
+          })}
         </div>
       )}
 
