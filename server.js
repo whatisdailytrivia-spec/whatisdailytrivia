@@ -634,7 +634,13 @@ app.post("/api/register", async (req, res) => {
     const { username, password, profile } = req.body;
     if (!username || !password || !profile) return res.status(400).json({ error: "username, password, profile required" });
     const email = String(profile.email || "").trim().toLowerCase();
-    const profileNorm = { ...profile, email };
+    // Server-side signup guards (defense in depth — client checks these too)
+    const fullName = String(profile.fullName || "").trim();
+    if (fullName.split(/\s+/).filter(Boolean).length < 2) return res.json({ ok: false, error: "name_required" });
+    const emailDomain = email.split("@")[1] || "";
+    const DISPOSABLE = new Set(["mailinator.com","guerrillamail.com","guerrillamail.info","grr.la","sharklasers.com","10minutemail.com","10minutemail.net","temp-mail.org","tempmail.com","tempmail.dev","throwawaymail.com","yopmail.com","trashmail.com","getnada.com","nada.email","dispostable.com","maildrop.cc","fakeinbox.com","mailnesia.com","mintemail.com","mohmal.com","emailondeck.com","spam4.me","tempinbox.com","moakt.com","mailcatch.com","tempr.email","discard.email","getairmail.com","mailpoof.com","harakirimail.com","tmpmail.org","minuteinbox.com"]);
+    if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email) || DISPOSABLE.has(emailDomain)) return res.json({ ok: false, error: "bad_email" });
+    const profileNorm = { ...profile, email, fullName };
     const claim = await evalJson(REGISTER_LUA, "users", [String(username), JSON.stringify(profileNorm), email]);
     if (claim && claim.taken) return res.json({ ok: false, taken: true });
     if (claim && claim.emailTaken) return res.json({ ok: false, emailTaken: true });

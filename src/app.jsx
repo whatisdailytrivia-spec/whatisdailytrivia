@@ -214,6 +214,12 @@ const dailyStats = (subs, usernames) => {
   return { played, correct, pctCorrect: Math.round((correct / played) * 100), avgScore: Math.round(totalPts / played) };
 };
 
+// Reject throwaway/disposable email domains at signup (server double-checks too).
+const DISPOSABLE_EMAIL_DOMAINS = new Set(["mailinator.com","guerrillamail.com","guerrillamail.info","grr.la","sharklasers.com","10minutemail.com","10minutemail.net","temp-mail.org","tempmail.com","tempmail.dev","throwawaymail.com","yopmail.com","trashmail.com","getnada.com","nada.email","dispostable.com","maildrop.cc","fakeinbox.com","mailnesia.com","mintemail.com","mohmal.com","emailondeck.com","spam4.me","tempinbox.com","moakt.com","mailcatch.com","tempr.email","discard.email","getairmail.com","mailpoof.com","harakirimail.com","tmpmail.org","minuteinbox.com"]);
+const isDisposableEmail = (email) => DISPOSABLE_EMAIL_DOMAINS.has((String(email).split("@")[1] || "").toLowerCase());
+// Public-safe display: "First L." from a full name — keeps strangers' full names private.
+const publicNameFrom = (full) => { const p = String(full || "").trim().split(/\s+/).filter(Boolean); if (!p.length) return ""; return p.length > 1 ? `${p[0]} ${p[p.length - 1][0].toUpperCase()}.` : p[0]; };
+
 // Acquisition source of an account, with graceful fallback for older records:
 // signupSource (new) → referralSource (earlier) → inferred from referredBy → direct.
 const sourceOf = (u) => {
@@ -677,7 +683,7 @@ export default function App() {
 
 function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
-  const [form, setForm] = useState({ username: "", email: "", password: "", state: "" });
+  const [form, setForm] = useState({ fullName: "", username: "", email: "", password: "", state: "" });
   const [answer, setAnswer] = useState("");
   const [result, setResult] = useState(null);
   const [error, setError] = useState("");
@@ -766,9 +772,11 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const doAuth = async () => {
     setError("");
     if (authMode === "register") {
-      if (!form.username || !form.email || !form.password || !form.state) return setError("All fields required.");
+      if (!form.fullName || !form.username || !form.email || !form.password || !form.state) return setError("All fields required.");
+      if (form.fullName.trim().split(/\s+/).filter(Boolean).length < 2) return setError("Please enter your first and last name.");
       const email = form.email.trim().toLowerCase();
       if (!/^[^\s@]+@[^\s@]+\.[^\s@]{2,}$/.test(email)) return setError("Please enter a valid email address.");
+      if (isDisposableEmail(email)) return setError("Please use a permanent email address (no temporary/disposable inboxes).");
       if (users[form.username]) return setError("Username taken.");
       if (Object.values(users || {}).some(u => u && (u.email || "").trim().toLowerCase() === email)) return setError("An account with this email already exists.");
       // Where this signup came from: refer-a-friend link (?ref=), group invite link
@@ -786,7 +794,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         } catch (e) {}
         return { referredBy: "", signupSource: "direct" };
       })();
-      const profile = { username: form.username, email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy, signupSource };
+      const profile = { username: form.username, fullName: form.fullName.trim(), displayName: publicNameFrom(form.fullName), email, state: form.state, streak: 0, joined: todayKey(), createdAt: Date.now(), referredBy, signupSource };
       let res;
       try {
         res = await atomicPost("/api/register", { username: form.username, password: form.password, profile });
@@ -795,7 +803,11 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const legacy = await registerUser(form.username, { ...profile, password: form.password });
         res = legacy.ok ? { ok: true, user: { ...profile, password: form.password } } : { ok: false, taken: true };
       }
-      if (!res.ok) return setError(res.emailTaken ? "An account with this email already exists." : "Username taken.");
+      if (!res.ok) return setError(
+        res.emailTaken ? "An account with this email already exists."
+        : res.error === "name_required" ? "Please enter your first and last name."
+        : res.error === "bad_email" ? "Please use a valid, permanent email address."
+        : "Username taken.");
       const u = res.user || profile;
       setUser(u); localStorage.setItem("whatis_user", JSON.stringify(u));
       setUsers(prev => ({ ...prev, [form.username]: u }));
@@ -815,7 +827,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       if (!f.joined) await saveUser(form.username, { joined: healed.joined });
       setUser(healed); localStorage.setItem("whatis_user", JSON.stringify(healed));
     }
-    setForm({ username: "", email: "", password: "", state: "" });
+    setForm({ fullName: "", username: "", email: "", password: "", state: "" });
   };
 
   // Primary path: the server grades, times, scores, and records everything.
@@ -986,6 +998,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
           ))}
         </div>
         <div style={{ display: "flex", flexDirection: "column", gap: 9 }}>
+          {authMode === "register" && <input style={s.input} placeholder="Full name" value={form.fullName} onChange={e => setForm({ ...form, fullName: e.target.value })} onKeyDown={e => e.key === "Enter" && doAuth()} />}
           <input style={s.input} placeholder="Username" value={form.username} onChange={e => setForm({ ...form, username: e.target.value })} onKeyDown={e => e.key === "Enter" && doAuth()} />
           {authMode === "register" && <input style={s.input} placeholder="Email" type="email" value={form.email} onChange={e => setForm({ ...form, email: e.target.value })} />}
           <input style={s.input} placeholder="Password" type="password" value={form.password} onChange={e => setForm({ ...form, password: e.target.value })} onKeyDown={e => e.key === "Enter" && doAuth()} />
@@ -3915,7 +3928,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
           {(() => {
             const q = userSearch.trim().toLowerCase();
             const list = Object.values(adminUsers)
-              .filter(u => !q || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q))
+              .filter(u => !q || (u.username || "").toLowerCase().includes(q) || (u.email || "").toLowerCase().includes(q) || (u.fullName || "").toLowerCase().includes(q))
               .sort((a, b) => userSort === "alpha"
                 ? (a.username || "").localeCompare(b.username || "")
                 : userSort === "oldest"
@@ -3931,7 +3944,7 @@ function AdminTab({ adminUnlocked, setAdminUnlocked, question, setQuestion }) {
                   borderRadius: editingUser === u.username ? "8px 8px 0 0" : 8,
                   marginBottom: editingUser === u.username ? 0 : 6, cursor: "pointer" }}>
                 <div>
-                  <div style={{ fontWeight: 500, fontSize: "0.85rem" }}>{u.username}</div>
+                  <div style={{ fontWeight: 500, fontSize: "0.85rem" }}>{u.username}{u.fullName ? <span style={{ color: TEXT_MUTED, fontWeight: 400 }}> · {u.fullName}</span> : null}</div>
                   <div style={{ ...s.mono, fontSize: "0.67rem", color: TEXT_MUTED, marginTop: 1 }}>{u.email}</div>
                   {u.joined && <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 2 }}>Joined {new Date(u.joined + "T00:00:00").toLocaleDateString("en-US", { month: "short", day: "numeric", year: "numeric" })}</div>}
                 </div>
