@@ -555,7 +555,10 @@ export default function App() {
         </div>
         {isMobile ? (
           <div style={{ display: "flex", alignItems: "center", gap: 10 }}>
-            {user && liveStreakOf(user.streak, user.lastPlayed) > 0 && <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {liveStreakOf(user.streak, user.lastPlayed)}</div>}
+            {user && (liveStreakOf(user.streak, user.lastPlayed) > 0
+              ? <div style={{ ...s.badge, background: SURFACE2, border: `1px solid ${SURFACE3}`, color: GOLD }}>🔥 {liveStreakOf(user.streak, user.lastPlayed)}</div>
+              : <button onClick={() => goTab("groups")} style={{ ...s.badge, background: SURFACE2, border: `1px solid ${GOLD}`, color: GOLD, cursor: "pointer", fontFamily: SANS, display: "flex", alignItems: "center", gap: 4 }}>👥 Groups</button>
+            )}
             <button onClick={() => setMenuOpen(!menuOpen)} style={{ background: "transparent", border: `1px solid ${SURFACE3}`, borderRadius: 6, padding: "7px 10px", cursor: "pointer", color: OFF_WHITE, fontSize: "1rem", lineHeight: 1 }}>
               {menuOpen ? "✕" : "☰"}
             </button>
@@ -675,7 +678,7 @@ export default function App() {
           const shownTab = (!user && tab !== "leaderboard") ? "play" : tab;
           return <>
         {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} setLeaderboard={setLeaderboard} saveLBEntry={saveLBEntry} />}
-        {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} />}
+        {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} onGoGroups={() => goTab(user ? "groups" : "play")} />}
         {shownTab === "winners"     && <WinnersTab />}
         {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} leaderboard={leaderboard} />}
         {shownTab === "account"     && <AccountTab user={user} setUser={setUser} users={users} saveUser={saveUser} leaderboard={leaderboard} patchLBEntry={patchLBEntry} />}
@@ -1502,7 +1505,7 @@ function WinnersTab() {
   );
 }
 
-function LeaderboardTab({ leaderboard, user, submissions }) {
+function LeaderboardTab({ leaderboard, user, submissions, onGoGroups }) {
   return (
     <div>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 12, flexWrap: "wrap", marginBottom: 14 }}>
@@ -1533,6 +1536,26 @@ function LeaderboardTab({ leaderboard, user, submissions }) {
         </div>
       </div>
       <DailyAverages stats={dailyStats(submissions, null)} label="Today's averages — all players" />
+      {(() => {
+        const real = orderBoard(leaderboard).real;
+        const myRank = user ? real.findIndex(e => e.username === user.username) + 1 : 0;
+        if (user && myRank > 0 && myRank <= 10) return null;  // top-10 players are in contention — no nudge
+        return (
+          <div style={{ background: SURFACE2, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "16px 20px", marginBottom: 20, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 14, flexWrap: "wrap" }}>
+            <div style={{ flex: 1, minWidth: 210 }}>
+              <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE, marginBottom: 4 }}>Can't crack the top 10?</div>
+              <div style={{ color: TEXT_SEC, fontSize: "0.82rem", lineHeight: 1.5 }}>
+                {user
+                  ? <>Start a private group and run your own leaderboard — challenge friends, family, or coworkers head-to-head.{myRank > 0 ? ` You're #${myRank} globally right now.` : ""}</>
+                  : <>Sign up and start a private group — run your own leaderboard with friends, family, or coworkers.</>}
+              </div>
+            </div>
+            <button onClick={onGoGroups} style={{ background: GOLD, color: "#111", border: "none", borderRadius: 8, padding: "11px 18px", fontWeight: 700, fontFamily: SANS, fontSize: "0.82rem", cursor: "pointer", whiteSpace: "nowrap" }}>
+              👥 {user ? "Start a group" : "Get started"} →
+            </button>
+          </div>
+        );
+      })()}
       {(() => {
         const { real, hosts } = orderBoard(leaderboard);
         const medalsToday = medalRanksFrom(submissions);
