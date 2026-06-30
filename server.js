@@ -104,6 +104,7 @@ async function publishDaily(force = false) {
   const monthKey = getESTMonthKey();
   const dayNum   = parseInt(dateStr.slice(8), 10);
   await finalizeAnalytics();
+  await archivePrevMonthIfNeeded();
   if (!force && etHour() < 6) return { ok: true, skipped: "before_6am_ET", date: dateStr };
   if (await dbGet(`question:${dateStr}`)) return { ok: true, already: true, date: dateStr };
   const override = await dbGet(`qoverride:${dateStr}`);
@@ -156,6 +157,28 @@ cron.schedule("0 0 1 * *", async () => {
     console.log("[CRON monthly] Done.");
   } catch (e) { console.error("[CRON monthly] Error:", e.message); }
 }, { timezone: "America/New_York" });
+
+// Failsafe for the monthly archive: if the previous month's leaderboard exists but its
+// hall-of-fame snapshot was never written (e.g. the midnight-ET monthly cron was missed
+// because the instance was asleep), write it now. Idempotent — only writes when missing.
+// Called from publishDaily, which the external GitHub Action hits reliably each morning
+// (and which wakes the instance), so the winner archive is guaranteed by ~6am ET on the
+// 1st at the latest even if the midnight cron never fired.
+async function archivePrevMonthIfNeeded() {
+  try {
+    const now  = new Date(new Date().toLocaleString("en-US", { timeZone: "America/New_York" }));
+    const prev = new Date(now.getFullYear(), now.getMonth() - 1, 1);
+    const prevKey = `${prev.getFullYear()}-${String(prev.getMonth() + 1).padStart(2, "0")}`;
+    if (await dbGet(`halloffame:${prevKey}`)) return;            // already archived — nothing to do
+    const lbRaw = await dbGet(`leaderboard:${prevKey}`);
+    if (!lbRaw) return;
+    const lb = JSON.parse(lbRaw);
+    if (lb.length > 0) {
+      await dbSet(`halloffame:${prevKey}`, lbRaw);
+      console.log(`[archive catch-up] Wrote halloffame:${prevKey} — winner ${lb[0].username} (${lb[0].points} pts)`);
+    }
+  } catch (e) { console.error("[archive catch-up] Error:", e.message); }
+}
 
 // ─── Helpers ──────────────────────────────────────────────────────────────────
 
