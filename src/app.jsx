@@ -757,6 +757,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [submitting, setSubmitting] = useState(false);
   const [refCopied, setRefCopied] = useState(false);
   const [refOpen, setRefOpen] = useState(false);
+  const [refQR, setRefQR] = useState(false);
   const answered = user && submissions[user.username];
   const started = viewStart != null;
 
@@ -1318,6 +1319,13 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                   <a href={`mailto:?subject=${encodeURIComponent("Play WhatIs... Daily Trivia with me")}&body=${encodeURIComponent(refMsg)}`} style={shareBtn}>Email</a>
                   <button onClick={() => { try { navigator.clipboard.writeText(refLink); } catch (e) {} setRefCopied(true); setTimeout(() => setRefCopied(false), 2000); }} style={{ ...shareBtn, ...(refCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{refCopied ? "Copied!" : "Copy"}</button>
                 </div>
+                <button onClick={() => setRefQR(q => !q)} style={{ width: "100%", marginTop: 10, background: SURFACE2, color: refQR ? GOLD : OFF_WHITE, border: `1px solid ${refQR ? GOLD : SURFACE3}`, borderRadius: 8, padding: "10px", fontFamily: SANS, fontWeight: 600, fontSize: "0.82rem", cursor: "pointer" }}>{refQR ? "Hide QR code" : "Show QR code"}</button>
+                {refQR && (
+                  <div style={{ marginTop: 12, textAlign: "center" }}>
+                    <img src={`https://api.qrserver.com/v1/create-qr-code/?size=460x460&margin=12&color=111111&bgcolor=FFFFFF&data=${encodeURIComponent(refLink)}`} alt="Join QR code" style={{ width: 200, height: 200, borderRadius: 12, background: "#fff", padding: 10, boxSizing: "border-box" }} />
+                    <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_MUTED, marginTop: 8 }}>Scan to join the Global Leaderboard</div>
+                  </div>
+                )}
               </div>
             )}
           </div>
@@ -1894,6 +1902,7 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
   const [banterUnread, setBanterUnread] = useState(0);
   const [inviteOpen, setInviteOpen] = useState(false);
   const [inviteCopied, setInviteCopied] = useState(false);
+  const [inviteQR, setInviteQR] = useState(false);
   const [confirmRemove, setConfirmRemove] = useState(null);
   const [groupTab, setGroupTab] = useState("board"); // group detail sub-tab: board | manage
 
@@ -2053,6 +2062,17 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
                           <a href={`sms:?&body=${encodeURIComponent(joinMsg)}`} style={ib}>Text</a>
                           <a href={`mailto:?subject=${encodeURIComponent("Join my WhatIs... Daily Trivia group")}&body=${encodeURIComponent(joinMsg)}`} style={ib}>Email</a>
                           <button onClick={() => { try { navigator.clipboard.writeText(joinLink); } catch (e) {} setInviteCopied(true); setTimeout(() => setInviteCopied(false), 2000); }} style={{ ...ib, ...(inviteCopied ? { borderColor: GOLD, color: GOLD } : {}) }}>{inviteCopied ? "Copied!" : "Copy"}</button>
+                        </div>
+                      );
+                    })()}
+                    <button onClick={() => setInviteQR(q => !q)} style={{ width: "100%", marginTop: 9, background: SURFACE2, color: inviteQR ? GOLD : OFF_WHITE, border: `1px solid ${inviteQR ? GOLD : SURFACE3}`, borderRadius: 7, padding: "8px", fontFamily: SANS, fontWeight: 600, fontSize: "0.74rem", cursor: "pointer" }}>{inviteQR ? "Hide QR code" : "Show QR code"}</button>
+                    {inviteQR && (() => {
+                      const ql = `${window.location.origin}/?join=${g.code}&by=${encodeURIComponent(user.username)}&src=qr`;
+                      const src = `https://api.qrserver.com/v1/create-qr-code/?size=440x440&margin=12&color=111111&bgcolor=FFFFFF&data=${encodeURIComponent(ql)}`;
+                      return (
+                        <div style={{ marginTop: 10, textAlign: "center" }}>
+                          <img src={src} alt="Group QR code" style={{ width: 190, height: 190, borderRadius: 10, background: "#fff", padding: 8, boxSizing: "border-box" }} />
+                          <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, marginTop: 6, lineHeight: 1.4 }}>Scan to join {g.name}</div>
                         </div>
                       );
                     })()}
