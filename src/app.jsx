@@ -1458,22 +1458,23 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 background: ok ? "rgba(76,175,125,0.08)" : "rgba(224,92,92,0.08)",
                 border: `1px solid ${ok ? "rgba(76,175,125,0.25)" : "rgba(224,92,92,0.25)"}`,
                 borderRadius: 8, overflow: "hidden" }}>
-                <div style={{ padding: "12px 14px", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}` }}>
-                  <div style={{ fontWeight: 600, fontSize: "0.88rem", color: ok ? "#4CAF7D" : "#E05C5C", marginBottom: 4 }}>
-                    {ok ? "✓ Correct!" : "✗ Incorrect"}
+                <div style={{ padding: "12px 14px", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}`, display: "flex", flexDirection: "column", justifyContent: "center" }}>
+                  <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Answer</div>
+                  <div style={{ fontWeight: 600, fontSize: "0.92rem", color: ok ? "#4CAF7D" : "#E05C5C" }}>
+                    {ok ? "✓ Correct" : "✗ Incorrect"}
                   </div>
-                  <div style={{ ...s.mono, fontSize: "0.68rem", color: TEXT_SEC }}>Time: {sub?.responseTime}s</div>
                 </div>
-                <div style={{ padding: "12px 14px", textAlign: "center", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}` }}>
+                <div style={{ padding: "12px 14px", textAlign: "center", borderRight: `1px solid ${ok ? "rgba(76,175,125,0.15)" : "rgba(224,92,92,0.15)"}`, display: "flex", flexDirection: "column", justifyContent: "center" }}>
                   <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Speed Multiplier</div>
                   <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: OFF_WHITE }}>{sub?.speedMult ?? 100}%</div>
+                  <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, marginTop: 3 }}>Time: {sub?.responseTime}s</div>
                 </div>
-                <div style={{ padding: "12px 14px", textAlign: "right" }}>
+                <div style={{ padding: "12px 14px", textAlign: "right", display: "flex", flexDirection: "column", justifyContent: "center", alignItems: "flex-end" }}>
                   <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Points</div>
                   <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: GOLD }}>+{sub?.points}</div>
-                  {ok && sub?.streakBonus > 0 && (
-                    <div title={`${sub.streak}-day streak · +1 pt per day after day 1`} style={{ ...s.mono, fontSize: "0.62rem", color: "#3FB950", marginTop: 2 }}>incl. 🔥 streak +{sub.streakBonus}</div>
-                  )}
+                  {(() => { const stk = sub?.streak ?? 0; return (
+                    <div title={stk > 0 ? `${stk}-day streak · +1 pt per day after day 1` : "Answer correctly tomorrow to start a new streak"} style={{ ...s.mono, fontSize: "0.66rem", color: stk > 0 ? "#3FB950" : TEXT_MUTED, marginTop: 3 }}>Daily Streak: {stk}{stk > 0 ? " 🔥" : ""}</div>
+                  ); })()}
                 </div>
               </div>
               {ok && !(sub?.streakBonus > 0) && (
