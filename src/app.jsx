@@ -1471,21 +1471,16 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 <div style={{ padding: "12px 14px", textAlign: "right" }}>
                   <div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, textTransform: "uppercase", letterSpacing: "0.08em", marginBottom: 4 }}>Points</div>
                   <div style={{ fontFamily: SERIF, fontSize: "1.15rem", fontWeight: 700, color: GOLD }}>+{sub?.points}</div>
+                  {ok && sub?.streakBonus > 0 && (
+                    <div title={`${sub.streak}-day streak · +1 pt per day after day 1`} style={{ ...s.mono, fontSize: "0.62rem", color: "#3FB950", marginTop: 2 }}>incl. 🔥 streak +{sub.streakBonus}</div>
+                  )}
                 </div>
               </div>
-              {ok && (sub?.streakBonus > 0 ? (
-                <div style={{ marginTop: 12, padding: "11px 16px", background: "rgba(63,185,80,0.10)", border: "1px solid rgba(63,185,80,0.32)", borderRadius: 8, display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10 }}>
-                  <div>
-                    <div style={{ fontWeight: 600, fontSize: "0.85rem", color: "#3FB950" }}>🔥 Streak Bonus</div>
-                    <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_SEC, marginTop: 2 }}>{sub.streak}-day streak · +1 pt per day after day 1</div>
-                  </div>
-                  <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: "#3FB950" }}>+{sub.streakBonus}</div>
-                </div>
-              ) : (
-                <div style={{ marginTop: 12, padding: "10px 14px", background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 8, textAlign: "center", ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED }}>
+              {ok && !(sub?.streakBonus > 0) && (
+                <div style={{ marginTop: 8, textAlign: "center", ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED }}>
                   🔥 Come back tomorrow — a 2-day streak starts earning Streak Bonus points.
                 </div>
-              ))}
+              )}
               <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(76,175,125,0.08)", border: "1px solid rgba(76,175,125,0.25)", borderRadius: 8, textAlign: "center" }}>
                 <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
