@@ -693,6 +693,161 @@ export default function App() {
   );
 }
 
+/* ── Monthly Wrapped — personal month recap + shareable image ─────────────── */
+function drawWrappedCanvas(wd, name) {
+  const W = 1080, H = 1920;
+  const c = document.createElement("canvas"); c.width = W; c.height = H;
+  const x = c.getContext("2d");
+  const rr = (x0, y0, w, h, r) => { x.beginPath(); if (x.roundRect) x.roundRect(x0, y0, w, h, r); else x.rect(x0, y0, w, h); };
+  x.fillStyle = "#08080B"; x.fillRect(0, 0, W, H);
+  x.strokeStyle = "rgba(201,168,76,0.55)"; x.lineWidth = 6; rr(40, 40, W - 80, H - 80, 36); x.stroke();
+  x.textAlign = "center";
+  x.fillStyle = "#C9A84C"; x.font = "700 108px Georgia, serif"; x.fillText("WhatIs…", W / 2, 250);
+  x.fillStyle = "#8A8A92"; x.font = "38px 'Courier New', monospace"; x.fillText(`YOUR ${wd.monthLabel.toUpperCase()} WRAPPED`, W / 2, 330);
+  x.fillStyle = "#F5F3EE"; x.font = "600 46px Georgia, serif"; x.fillText(name, W / 2, 430);
+  if (wd.rank) {
+    x.fillStyle = "#C9A84C"; x.font = "700 190px Georgia, serif"; x.fillText(`#${wd.rank}`, W / 2, 660);
+    x.fillStyle = "#8A8A92"; x.font = "36px 'Courier New', monospace"; x.fillText(`OF ${wd.totalPlayers} PLAYERS · ${wd.points.toLocaleString()} PTS`, W / 2, 730);
+  } else {
+    x.fillStyle = "#C9A84C"; x.font = "700 150px Georgia, serif"; x.fillText(`${wd.points.toLocaleString()} pts`, W / 2, 640);
+  }
+  const tile = (tx, ty, label, value, color) => {
+    x.fillStyle = "#131316"; rr(tx, ty, 450, 210, 20); x.fill();
+    x.strokeStyle = "#2A2A30"; x.lineWidth = 2; rr(tx, ty, 450, 210, 20); x.stroke();
+    x.textAlign = "left";
+    x.fillStyle = "#8A8A92"; x.font = "28px 'Courier New', monospace"; x.fillText(label, tx + 34, ty + 62);
+    x.fillStyle = color || "#F5F3EE"; x.font = "700 68px Georgia, serif"; x.fillText(value, tx + 34, ty + 158);
+    x.textAlign = "center";
+  };
+  tile(70, 800, "PLAYED", `${wd.played}/${wd.totalQs}`);
+  tile(560, 800, `ACCURACY · PACK ${wd.commAcc}%`, `${wd.acc}%`);
+  tile(70, 1050, "BEST STREAK", wd.bestStreak > 0 ? `${wd.bestStreak} day${wd.bestStreak === 1 ? "" : "s"}` : "—", "#3FB950");
+  tile(560, 1050, "FASTEST WIN", wd.fastest != null ? `${wd.fastest}s` : "—");
+  x.fillStyle = "rgba(201,168,76,0.07)"; rr(70, 1310, 940, 180, 20); x.fill();
+  x.strokeStyle = "rgba(201,168,76,0.4)"; x.lineWidth = 2; rr(70, 1310, 940, 180, 20); x.stroke();
+  x.textAlign = "left";
+  x.fillStyle = "#C9A84C"; x.font = "28px 'Courier New', monospace"; x.fillText("BEST CATEGORY", 104, 1372);
+  x.fillStyle = "#F5F3EE"; x.font = "700 60px Georgia, serif"; x.fillText(wd.bestCat || "—", 104, 1452);
+  x.textAlign = "center";
+  x.fillStyle = "#8A8A92"; x.font = "34px 'Courier New', monospace"; x.fillText("@whatis_dailytrivia", W / 2, 1720);
+  x.fillStyle = "#6B6B72"; x.font = "30px 'Courier New', monospace"; x.fillText("NEW MONTH. CLEAN BOARD.", W / 2, 1775);
+  x.fillText("whatisdailytrivia.onrender.com", W / 2, 1825);
+  return c;
+}
+
+function WrappedOverlay({ user, onClose }) {
+  const mk = prevMonthKey();
+  const [yr, mo] = mk.split("-").map(Number);
+  const monthLabel = new Date(yr, mo - 1, 1).toLocaleDateString("en-US", { month: "long" });
+  const [wd, setWd] = useState(null);
+  const [loading, setLoading] = useState(true);
+  const [shared, setShared] = useState(false);
+  useEffect(() => {
+    let cancel = false;
+    (async () => {
+      try {
+        const [hofR, hR] = await Promise.all([
+          apiStorage.get(`halloffame:${mk}`).catch(() => null),
+          apiStorage.get(`history:${user.username}`).catch(() => null),
+        ]);
+        const lbArr = hofR ? JSON.parse(hofR.value) : [];
+        const real = (Array.isArray(lbArr) ? lbArr : []).filter(e => e && !isExcludedUser(e.username)).sort((a, b) => (b.points || 0) - (a.points || 0));
+        const idx = real.findIndex(e => e.username === user.username);
+        const totA = real.reduce((s, e) => s + (e.answered || 0), 0);
+        const totC = real.reduce((s, e) => s + (e.correct || 0), 0);
+        const h = hR ? JSON.parse(hR.value) : null;
+        const days = ((h && h.dailyLog) || []).filter(e => e && typeof e.date === "string" && e.date.startsWith(mk));
+        const played = days.length;
+        const correctN = days.filter(e => e.correct).length;
+        const pts = days.reduce((s, e) => s + (e.points || 0), 0);
+        const sortedDays = days.slice().sort((a, b) => (a.date < b.date ? -1 : 1));
+        let best = 0, cur = 0, lastCorrect = null;
+        for (const e of sortedDays) {
+          if (e.correct) { cur = (lastCorrect && prevDayKey(e.date) === lastCorrect) ? cur + 1 : 1; lastCorrect = e.date; if (cur > best) best = cur; }
+          else { cur = 0; lastCorrect = null; }
+        }
+        const times = days.filter(e => e.correct && Number.isFinite(e.responseTime)).map(e => e.responseTime);
+        const cats = {};
+        for (const e of sortedDays) { const k = e.category || "Wildcard"; cats[k] = cats[k] || { a: 0, c: 0 }; cats[k].a += 1; if (e.correct) cats[k].c += 1; }
+        let bestCat = null, bc = null;
+        for (const [k, v] of Object.entries(cats)) {
+          if (v.c === 0) continue;
+          if (!bc || v.c > bc.c || (v.c === bc.c && v.c / v.a > bc.c / bc.a)) { bc = v; bestCat = `${k} · ${v.c} for ${v.a}`; }
+        }
+        const me = idx >= 0 ? real[idx] : null;
+        if (!cancel) setWd({
+          monthLabel, played, totalQs: mk === "2026-06" ? 16 : new Date(yr, mo, 0).getDate(),
+          acc: played ? Math.round((correctN / played) * 100) : 0,
+          commAcc: totA ? Math.round((totC / totA) * 100) : 0,
+          points: me ? (me.points || 0) : pts,
+          rank: idx >= 0 ? idx + 1 : null, totalPlayers: real.length,
+          bestStreak: best, fastest: times.length ? Math.min(...times) : null, bestCat,
+        });
+      } catch (e) { if (!cancel) setWd(null); }
+      if (!cancel) setLoading(false);
+    })();
+    return () => { cancel = true; };
+  }, [user.username]);
+  const name = user.displayName || user.username;
+  const shareIt = () => {
+    if (!wd) return;
+    const cv = drawWrappedCanvas(wd, name);
+    cv.toBlob(async (blob) => {
+      if (!blob) return;
+      const file = new File([blob], `whatis-wrapped-${mk}.png`, { type: "image/png" });
+      let ok = false;
+      if (navigator.canShare && navigator.share && navigator.canShare({ files: [file] })) {
+        try { await navigator.share({ files: [file], title: "WhatIs… Wrapped" }); ok = true; } catch (e) {}
+      }
+      if (!ok) {
+        const url = URL.createObjectURL(blob);
+        const a = document.createElement("a");
+        a.href = url; a.download = `whatis-wrapped-${mk}.png`;
+        document.body.appendChild(a); a.click(); document.body.removeChild(a);
+        setTimeout(() => URL.revokeObjectURL(url), 10000);
+      }
+      setShared(true);
+    }, "image/png");
+  };
+  const tileSt = { background: SURFACE2, border: `1px solid ${SURFACE3}`, borderRadius: 10, padding: "12px 14px" };
+  return (
+    <div onClick={onClose} style={{ position: "fixed", inset: 0, background: "rgba(0,0,0,0.8)", zIndex: 1000, overflowY: "auto", display: "flex", justifyContent: "center", alignItems: "flex-start", padding: "28px 14px" }}>
+      <div onClick={e => e.stopPropagation()} style={{ width: "100%", maxWidth: 400, background: BLACK, border: `1px solid ${GOLD}`, borderRadius: 16, padding: "24px 20px", position: "relative" }}>
+        <button onClick={onClose} aria-label="Close" style={{ position: "absolute", top: 10, right: 12, background: "none", border: "none", color: TEXT_MUTED, fontSize: "1.3rem", cursor: "pointer" }}>×</button>
+        <div style={{ textAlign: "center", fontFamily: SERIF, fontSize: "1.6rem", fontWeight: 700, color: GOLD }}>WhatIs…</div>
+        <div style={{ textAlign: "center", ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, letterSpacing: "0.22em", margin: "2px 0 4px" }}>YOUR {monthLabel.toUpperCase()} WRAPPED</div>
+        <div style={{ textAlign: "center", fontFamily: SERIF, fontSize: "0.95rem", color: OFF_WHITE, marginBottom: 14 }}>{name}</div>
+        {loading ? (
+          <div style={{ textAlign: "center", color: TEXT_MUTED, padding: "30px 0" }}>Loading your month…</div>
+        ) : !wd || wd.played === 0 ? (
+          <div style={{ textAlign: "center", color: TEXT_SEC, padding: "20px 0 30px", fontSize: "0.9rem" }}>You didn't play in {monthLabel} — this month is your fresh start. See you at 6 AM.</div>
+        ) : (
+          <>
+            {wd.rank && (
+              <div style={{ textAlign: "center", marginBottom: 14 }}>
+                <div style={{ fontFamily: SERIF, fontSize: "2.6rem", fontWeight: 700, color: GOLD, lineHeight: 1 }}>#{wd.rank}</div>
+                <div style={{ ...s.mono, fontSize: "0.66rem", color: TEXT_MUTED, marginTop: 4 }}>OF {wd.totalPlayers} PLAYERS · {wd.points.toLocaleString()} PTS</div>
+              </div>
+            )}
+            <div style={{ display: "grid", gridTemplateColumns: "1fr 1fr", gap: 8, marginBottom: 8 }}>
+              <div style={tileSt}><div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, letterSpacing: "0.08em" }}>PLAYED</div><div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE }}>{wd.played}<span style={{ fontSize: "0.85rem", color: TEXT_MUTED }}>/{wd.totalQs}</span></div></div>
+              <div style={tileSt}><div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, letterSpacing: "0.08em" }}>ACCURACY</div><div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE }}>{wd.acc}<span style={{ fontSize: "0.85rem", color: TEXT_MUTED }}>% vs {wd.commAcc}%</span></div></div>
+              <div style={tileSt}><div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, letterSpacing: "0.08em" }}>BEST STREAK</div><div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: "#3FB950" }}>{wd.bestStreak > 0 ? `${wd.bestStreak} day${wd.bestStreak === 1 ? "" : "s"}` : "—"}</div></div>
+              <div style={tileSt}><div style={{ ...s.mono, fontSize: "0.6rem", color: TEXT_MUTED, letterSpacing: "0.08em" }}>FASTEST WIN</div><div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: OFF_WHITE }}>{wd.fastest != null ? `${wd.fastest}s` : "—"}</div></div>
+            </div>
+            <div style={{ background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.28)", borderRadius: 10, padding: "11px 14px", marginBottom: 14 }}>
+              <div style={{ ...s.mono, fontSize: "0.6rem", color: GOLD, letterSpacing: "0.08em", marginBottom: 2 }}>BEST CATEGORY</div>
+              <div style={{ fontFamily: SERIF, fontSize: "1.05rem", fontWeight: 700, color: OFF_WHITE }}>{wd.bestCat || "—"}</div>
+            </div>
+            <button onClick={shareIt} style={{ display: "block", width: "100%", padding: "13px", borderRadius: 8, background: GOLD, color: BLACK, border: "none", fontFamily: SANS, fontWeight: 600, fontSize: "0.95rem", cursor: "pointer" }}>{shared ? "Shared ✓ — share again" : "Share my Wrapped"}</button>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 8, textAlign: "center" }}>saves a story-sized image — post it, text it, flex it</div>
+          </>
+        )}
+      </div>
+    </div>
+  );
+}
+
 function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ fullName: "", username: "", email: "", password: "", state: "" });
@@ -787,6 +942,20 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
     } catch (e) {}
     setCalAdded(true); markReminderDone();
   };
+  const [wrappedOpen, setWrappedOpen] = useState(false);
+  const [wrappedReady, setWrappedReady] = useState(false);
+  const [wrappedSeen, setWrappedSeen] = useState(() => { try { return localStorage.getItem(`whatis_wrapped_seen:${prevMonthKey()}`) === "1"; } catch (e) { return false; } });
+  useEffect(() => {
+    if (!user || wrappedSeen) return;
+    let cancel = false;
+    apiStorage.get(`halloffame:${prevMonthKey()}`).then(r => { if (!cancel && r) setWrappedReady(true); }).catch(() => {});
+    return () => { cancel = true; };
+  }, [user && user.username]);
+  const openWrapped = () => {
+    setWrappedOpen(true); setWrappedSeen(true);
+    try { localStorage.setItem(`whatis_wrapped_seen:${prevMonthKey()}`, "1"); } catch (e) {}
+  };
+  const playedPrevMonth = !!(history && (history.dailyLog || []).some(e => e && typeof e.date === "string" && e.date.startsWith(prevMonthKey())));
   const answered = user && submissions[user.username];
   const started = viewStart != null;
 
@@ -1149,6 +1318,16 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
           )}
         </div>
       )}
+      {/* ── Monthly Wrapped banner (first visit after a month closes) ── */}
+      {user && wrappedReady && !wrappedSeen && playedPrevMonth && (
+        <div style={{ background: BLACK, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
+          <div style={{ ...s.mono, fontSize: "0.6rem", color: GOLD, letterSpacing: "0.18em", marginBottom: 5 }}>JUST DROPPED</div>
+          <div style={{ fontWeight: 600, fontSize: "0.95rem", color: OFF_WHITE, marginBottom: 3 }}>Your {new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleDateString("en-US", { month: "long" })} Wrapped is ready</div>
+          <div style={{ fontSize: "0.8rem", color: TEXT_SEC, marginBottom: 10 }}>See your month — rank, streaks, best category — and share it.</div>
+          <button onClick={openWrapped} style={{ display: "block", width: "100%", padding: "11px", borderRadius: 8, background: GOLD, color: BLACK, border: "none", fontFamily: SANS, fontWeight: 600, fontSize: "0.88rem", cursor: "pointer" }}>View my Wrapped</button>
+        </div>
+      )}
+      {wrappedOpen && user && <WrappedOverlay user={user} onClose={() => setWrappedOpen(false)} />}
       {/* ── One-time "add your real name" prompt (accounts created before the name field) ── */}
       {user && !user.fullName && !nameHidden && (
         <div style={{ background: "rgba(201,168,76,0.07)", border: `1px solid rgba(201,168,76,0.3)`, borderRadius: 10, padding: "14px 16px", marginBottom: 16 }}>
@@ -2343,6 +2522,7 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
   const [confirmPassword, setConfirmPassword] = useState("");
   const [pwError, setPwError] = useState("");
   const [pwSaved, setPwSaved] = useState(false);
+  const [wrappedOpen, setWrappedOpen] = useState(false);
 
   useEffect(() => { if (user) load(); }, [user?.username]);
 
@@ -2558,6 +2738,12 @@ function AccountTab({ user, setUser, users, saveUser, leaderboard, patchLBEntry 
           <div style={{ fontSize: "0.88rem", color: OFF_WHITE }}>{joined}</div>
         </div>
       </div>
+
+      {/* ── Monthly Wrapped (last completed month) ─────── */}
+      <button onClick={() => setWrappedOpen(true)} style={{ display: "block", width: "100%", background: BLACK, color: OFF_WHITE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "13px 16px", fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", cursor: "pointer", marginBottom: 4, textAlign: "left" }}>
+        <span style={{ color: GOLD }}>Wrapped</span> — your {new Date(new Date().getFullYear(), new Date().getMonth() - 1, 1).toLocaleDateString("en-US", { month: "long" })} in review
+      </button>
+      {wrappedOpen && <WrappedOverlay user={user} onClose={() => setWrappedOpen(false)} />}
 
       {/* ── All-Time Stats ─────────────────────────────── */}
       {loading && <div style={{ color: TEXT_MUTED, fontSize: "0.85rem", textAlign: "center", padding: "24px 0" }}>Loading stats...</div>}
