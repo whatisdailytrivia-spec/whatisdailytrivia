@@ -1497,13 +1497,14 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 </div>
               )}
               {reminderDone ? (
-                <div style={{ marginTop: 12, textAlign: "center", ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED }}>
-                  Next question at 6 AM ET · <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" style={{ color: GOLD, textDecoration: "none" }}>@whatis_dailytrivia</a> · <span onClick={addReminder} style={{ color: TEXT_SEC, cursor: "pointer", textDecoration: "underline" }}>{calAdded ? "reminder added ✓" : "calendar reminder"}</span>
+                <div style={{ marginTop: 12, textAlign: "center" }}>
+                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginBottom: 6 }}>Next question at 6 AM ET · <span onClick={addReminder} style={{ color: TEXT_SEC, cursor: "pointer", textDecoration: "underline" }}>{calAdded ? "reminder added ✓" : "calendar reminder"}</span></div>
+                  <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" style={{ color: GOLD, textDecoration: "none", fontFamily: SANS, fontWeight: 600, fontSize: "0.84rem" }}>Follow @whatis_dailytrivia → daily story reminders, weekly recaps &amp; monthly winners</a>
                 </div>
               ) : (
                 <div style={{ marginTop: 14, padding: "14px 16px", background: "#111013", border: `1px solid ${GOLD}`, borderRadius: 10 }}>
                   <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>That's it until tomorrow</div>
-                  <div style={{ fontSize: "0.85rem", color: TEXT_SEC, lineHeight: 1.55, marginBottom: 12 }}>Next question at 6 AM ET. We can't send push notifications — our daily story on Instagram is the reminder.</div>
+                  <div style={{ fontSize: "0.85rem", color: TEXT_SEC, lineHeight: 1.55, marginBottom: 12 }}>Next question at 6 AM ET. We can't send push notifications — follow our Instagram for daily story reminders, weekly recaps, and monthly winners.</div>
                   <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" onClick={markReminderDone} style={{ display: "block", textAlign: "center", padding: "12px", borderRadius: 8, background: GOLD, color: BLACK, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", textDecoration: "none" }}>Follow @whatis_dailytrivia</a>
                   <button onClick={addReminder} style={{ display: "block", width: "100%", marginTop: 8, padding: "12px", borderRadius: 8, background: SURFACE2, color: calAdded ? GOLD : OFF_WHITE, border: `1px solid ${calAdded ? GOLD : SURFACE3}`, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}>{calAdded ? "Reminder added ✓" : "Add a 6 AM reminder to my calendar"}</button>
                   <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 8, textAlign: "center" }}>a daily repeating reminder — nothing to install</div>
