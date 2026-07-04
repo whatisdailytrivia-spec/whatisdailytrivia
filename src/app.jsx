@@ -1483,19 +1483,19 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                 </div>
               )}
               <div style={{ marginTop: 14, padding: "14px 16px", background: "rgba(76,175,125,0.08)", border: "1px solid rgba(76,175,125,0.25)", borderRadius: 8, textAlign: "center" }}>
-                <div style={{ ...s.mono, fontSize: "0.62rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
+                <div style={{ ...s.mono, fontSize: "0.82rem", color: "#4CAF7D", textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>What is...</div>
                 <div style={{ fontFamily: SERIF, fontSize: "1.3rem", fontWeight: 700, color: GOLD, lineHeight: 1.25 }}>{sub?.displayAnswer || reveal || question?.displayAnswer || question?.answer}</div>
               </div>
               {(sub?.funFact || revealFact) && (
                 <div style={{ marginTop: 12, padding: "12px 16px", background: "rgba(201,168,76,0.07)", border: "1px solid rgba(201,168,76,0.28)", borderRadius: 8 }}>
-                  <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, letterSpacing: "0.08em", marginBottom: 6 }}>Fun Fact</div>
+                  <div style={{ ...s.mono, fontSize: "0.82rem", color: GOLD, letterSpacing: "0.08em", marginBottom: 6 }}>Fun Fact</div>
                   <div style={{ fontSize: "0.95rem", color: TEXT_SEC, lineHeight: 1.5, whiteSpace: "pre-line" }}>{sub?.funFact || revealFact}</div>
                 </div>
               )}
               {reminderDone ? (
                 <div style={{ marginTop: 12, textAlign: "center" }}>
-                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginBottom: 6 }}>Next question at 6 AM ET · <span onClick={addReminder} style={{ color: TEXT_SEC, cursor: "pointer", textDecoration: "underline" }}>{calAdded ? "reminder added ✓" : "calendar reminder"}</span></div>
                   <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" style={{ color: GOLD, textDecoration: "none", fontFamily: SANS, fontWeight: 600, fontSize: "0.84rem" }}>Follow @whatis_dailytrivia → daily story reminders, weekly recaps &amp; monthly winners</a>
+                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginTop: 6 }}>Next question at 6 AM ET · <span onClick={addReminder} style={{ color: TEXT_SEC, cursor: "pointer", textDecoration: "underline" }}>{calAdded ? "Reminder added ✓" : "Add Daily Calendar Reminder"}</span></div>
                 </div>
               ) : (
                 <div style={{ marginTop: 14, padding: "14px 16px", background: "#111013", border: `1px solid ${GOLD}`, borderRadius: 10 }}>
