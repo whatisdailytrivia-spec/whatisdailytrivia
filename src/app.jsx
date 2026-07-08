@@ -1492,7 +1492,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
             <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
               <div style={tile}>+</div>
               <div>
-                <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start a group</span><span style={{ color: OFF_WHITE }}> and </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>refer your friends</span></div>
+                <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start A Group</span><span style={{ color: OFF_WHITE }}> &amp; </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>Refer Your Friends</span></div>
                 <div style={rowSub}>Private leaderboards for friends, family &amp; colleagues.</div>
               </div>
             </div>
