@@ -515,7 +515,7 @@ export default function App() {
         const gEntry = gl ? (JSON.parse(gl.value) || []).find(e => e.username === username) : null;
         if (gEntry) await upsertEntry(`grouplb:${code}:${monthKey()}`, { ...gEntry });
       } catch (e) {}
-      return { ok: true, name: g.name, code };
+      return { ok: true, name: g.name, code, prize: g.prize || null };
     } catch (e) { return { ok: false }; }
   };
 
@@ -531,7 +531,7 @@ export default function App() {
     (async () => {
       const res = await joinGroupByCode(user.username, pending, { method: "link", by });
       try { localStorage.removeItem("whatis_join"); localStorage.removeItem("whatis_join_by"); } catch (e) {}
-      if (res && res.ok) setJoinedNotice(res.name || "your group");
+      if (res && res.ok) setJoinedNotice({ name: res.name || "your group", prize: res.prize || null });
     })();
   }, [user?.username]);
 
@@ -668,7 +668,7 @@ export default function App() {
         )}
         {joinedNotice && (
           <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 10, background: "rgba(76,175,125,0.1)", border: "1px solid rgba(76,175,125,0.35)", borderRadius: 8, padding: "11px 14px", marginBottom: 16 }}>
-            <span style={{ fontSize: "0.85rem", color: "#4CAF7D" }}>✓ You've joined <strong style={{ color: OFF_WHITE }}>{joinedNotice}</strong>! Find it under Groups.</span>
+            <span style={{ fontSize: "0.85rem", color: "#4CAF7D" }}>✓ You've joined <strong style={{ color: OFF_WHITE }}>{joinedNotice.name}</strong>! Find it under Groups.{joinedNotice.prize && <> This month's prize: <strong style={{ color: GOLD }}>{joinedNotice.prize}</strong>.</>}</span>
             <button onClick={() => setJoinedNotice(null)} style={{ background: "transparent", border: "none", color: TEXT_MUTED, fontSize: "1rem", cursor: "pointer", lineHeight: 1 }}>✕</button>
           </div>
         )}
@@ -2098,6 +2098,8 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
   const [renaming, setRenaming] = useState(false);
   const [newGroupName, setNewGroupName] = useState("");
   const [renameError, setRenameError] = useState("");
+  const [editingPrize, setEditingPrize] = useState(false);
+  const [newPrize, setNewPrize] = useState("");
   const [confirmLeave, setConfirmLeave] = useState(false);
   const [banterOpen, setBanterOpen] = useState(false);
   const [winnersOpen, setWinnersOpen] = useState(false);
@@ -2194,6 +2196,26 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     setRenaming(false); setNewGroupName("");
   };
 
+  // Founder/host-only: set, change, or clear this group's monthly prize (free text,
+  // e.g. "$50 off rent this month"). Saving an empty value removes the prize.
+  const savePrize = async () => {
+    const val = newPrize.trim();
+    await mergeWrite(`group:${activeGroup}`, (gg) => {
+      if (!gg) return gg;
+      const n = { ...gg };
+      if (val) n.prize = val; else delete n.prize;
+      return n;
+    }, null);
+    setGroupData(prev => {
+      const g = prev[activeGroup];
+      if (!g) return prev;
+      const n = { ...g };
+      if (val) n.prize = val; else delete n.prize;
+      return { ...prev, [activeGroup]: n };
+    });
+    setEditingPrize(false); setNewPrize("");
+  };
+
   const leaveGroup = async () => {
     const code = activeGroup;
     // Remove user from group's members list
@@ -2228,10 +2250,11 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
     const lb = boardFor(g);
     if (!g) return null;
     const isCreator = g.createdBy === user.username;
+    const canEditPrize = isCreator || user.username === "Tommyf10";
     return (
       <div>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: 8, marginBottom: 20 }}>
-          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); setWinnersOpen(false); setGroupTab("board"); setConfirmRemove(null); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
+          <button onClick={() => { setView("home"); setActiveGroup(null); setCreateSuccess(""); setRenaming(false); setConfirmLeave(false); setBanterOpen(false); setInviteOpen(false); setWinnersOpen(false); setGroupTab("board"); setConfirmRemove(null); setEditingPrize(false); setNewPrize(""); }} style={{ ...s.btnSec, display: "flex", alignItems: "center", gap: 5, fontSize: "0.8rem" }}>← Groups</button>
           <div style={{ display: "flex", alignItems: "center", gap: 8 }}>
             {/* Banter */}
             <button onClick={() => setBanterOpen(true)} title="Group Banter" style={{ position: "relative", display: "flex", alignItems: "center", gap: 5, background: SURFACE2, border: `1px solid ${banterUnread > 0 ? "rgba(224,92,92,0.55)" : SURFACE3}`, borderRadius: 7, padding: "7px 11px", color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", cursor: "pointer", whiteSpace: "nowrap" }}>
@@ -2311,6 +2334,36 @@ function GroupsTab({ user, setUser, saveUser, users, submissions, leaderboard })
         )}
 
         <div style={{ color: TEXT_SEC, fontSize: "0.8rem", marginBottom: 20 }}>{g.members.length} member{g.members.length !== 1 ? "s" : ""} · {new Date().toLocaleString("default", { month: "long", year: "numeric" })}</div>
+
+        {/* Group monthly prize (set by the founder; free text) */}
+        {editingPrize ? (
+          <div style={{ marginBottom: 18 }}>
+            <div style={{ display: "flex", gap: 8, alignItems: "center" }}>
+              <input
+                style={{ ...s.input, flex: 1 }}
+                placeholder="e.g. $50 off rent this month"
+                value={newPrize}
+                maxLength={60}
+                onChange={e => setNewPrize(e.target.value)}
+                onKeyDown={e => e.key === "Enter" && savePrize()}
+                autoFocus
+              />
+              <button style={{ ...s.btn, padding: "9px 14px", whiteSpace: "nowrap" }} onClick={savePrize}>Save</button>
+              <button style={{ ...s.btnSec, padding: "9px 12px" }} onClick={() => { setEditingPrize(false); setNewPrize(""); }}>✕</button>
+            </div>
+            <div style={{ color: TEXT_MUTED, fontSize: "0.72rem", marginTop: 5 }}>Save with an empty box to remove the prize.</div>
+          </div>
+        ) : g.prize ? (
+          <div style={{ display: "flex", alignItems: "center", gap: 8, background: "rgba(201,168,76,0.10)", border: "1px solid rgba(201,168,76,0.4)", borderRadius: 8, padding: "10px 13px", marginBottom: 18 }}>
+            <span style={{ fontSize: "0.9rem" }}>🏆</span>
+            <span style={{ color: GOLD, fontFamily: SANS, fontWeight: 600, fontSize: "0.83rem" }}>This month's prize: {g.prize}</span>
+            {canEditPrize && (
+              <button onClick={() => { setNewPrize(g.prize || ""); setEditingPrize(true); }} style={{ marginLeft: "auto", background: "transparent", border: "none", color: TEXT_MUTED, cursor: "pointer", fontSize: "0.78rem", padding: "2px 6px", whiteSpace: "nowrap" }}>✎ edit</button>
+            )}
+          </div>
+        ) : canEditPrize ? (
+          <button onClick={() => { setNewPrize(""); setEditingPrize(true); }} style={{ background: "transparent", border: `1px dashed ${SURFACE3}`, borderRadius: 8, color: TEXT_MUTED, cursor: "pointer", fontSize: "0.78rem", fontFamily: SANS, padding: "8px 13px", marginBottom: 18 }}>+ Set a monthly prize for this group</button>
+        ) : null}
 
         {isCreator && (
           <div style={{ display: "flex", gap: 8, marginBottom: 18 }}>
