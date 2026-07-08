@@ -854,6 +854,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [nameInput, setNameInput] = useState("");          // returning-user "add your name" prompt
   const [nameHidden, setNameHidden] = useState(false);
   const [nameSaving, setNameSaving] = useState(false);
+  const [showQ, setShowQ] = useState(false);               // post-answer: question collapsed by default
   const saveMyName = async () => {
     const fn = nameInput.trim();
     if (fn.split(/\s+/).filter(Boolean).length < 2 || nameSaving) return;
@@ -1370,24 +1371,36 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
           </div>
         ) : (
           <>
-            {/* Optional image */}
-            {question?.imageType === "map" && question?.numericCode && (
-              <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
-            )}
-            {question?.imageType === "flag" && question?.imageUrl && (
-              <div style={{ marginBottom: 14, textAlign: "center" }}>
-                <img src={question.imageUrl} alt={question.imageCaption || "Flag"}
-                  style={{ maxWidth: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 6, display: "block", margin: "0 auto" }} />
-                {question.imageCaption && (
-                  <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textAlign: "center", marginTop: 7, textTransform: "uppercase", letterSpacing: "0.08em" }}>
-                    {question.imageCaption}
+            {/* Question (+ optional image) — collapsed by default once answered, so the
+                result + How to Play sit higher; the toggle drops it back down. */}
+            {(!(result || answered) || showQ) && (
+              <>
+                {/* Optional image */}
+                {question?.imageType === "map" && question?.numericCode && (
+                  <CountryMap numericCode={question.numericCode} caption={question.imageCaption} />
+                )}
+                {question?.imageType === "flag" && question?.imageUrl && (
+                  <div style={{ marginBottom: 14, textAlign: "center" }}>
+                    <img src={question.imageUrl} alt={question.imageCaption || "Flag"}
+                      style={{ maxWidth: "100%", maxHeight: 220, objectFit: "contain", borderRadius: 6, display: "block", margin: "0 auto" }} />
+                    {question.imageCaption && (
+                      <div style={{ ...s.mono, fontSize: "0.65rem", color: TEXT_MUTED, textAlign: "center", marginTop: 7, textTransform: "uppercase", letterSpacing: "0.08em" }}>
+                        {question.imageCaption}
+                      </div>
+                    )}
                   </div>
                 )}
-              </div>
-            )}
 
-            {/* Question text */}
-            <div style={{ ...s.h1, marginBottom: 18 }}>{question?.question}</div>
+                {/* Question text */}
+                <div style={{ ...s.h1, marginBottom: 18 }}>{question?.question}</div>
+              </>
+            )}
+            {(result || answered) && (
+              <button onClick={() => setShowQ(v => !v)}
+                style={{ display: "block", width: "100%", marginBottom: 14, background: "transparent", border: `1px dashed ${SURFACE3}`, borderRadius: 8, color: TEXT_MUTED, cursor: "pointer", fontFamily: SANS, fontWeight: 600, fontSize: "0.78rem", padding: "9px 12px" }}>
+                {showQ ? "Hide Today's Question ▴" : "Show Today's Question ▾"}
+              </button>
+            )}
           </>
         )}
 
