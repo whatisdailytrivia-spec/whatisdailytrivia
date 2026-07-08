@@ -490,12 +490,19 @@ const calcMultiplier = (s) => Math.max(SCORE_FLOOR, 1 - Math.max(0, s - GRACE_PE
 // article ("the"/"a"/"an"), and singularize words so "Grammys" == "Grammy Awards".
 const stemWord = (w) => (w.length > 3 && w.endsWith("s") ? w.slice(0, -1) : w);
 const normalize = (s) => String(s || "").toLowerCase().replace(/-/g, " ").replace(/[^a-z0-9\s]/g, "").replace(/\s+/g, " ").trim().replace(/^(the|a|an)\s+/, "").split(" ").map(stemWord).join(" ");
-const checkAnswer = (u, c, aliases = []) => {
+const checkAnswer = (u, c, aliases = [], matchAll = false) => {
   const un = normalize(u);
   if (!un) return false;
   const targets = [c, ...(aliases || [])].map(normalize);
   return targets.some((cn) => {
     if (!cn) return false;
+    // matchAll (per-question opt-in, e.g. "name all three ..."): every significant
+    // word of the target must appear, in any order. The substring shortcut is
+    // skipped so a single part of a multi-part answer can't score full credit.
+    if (matchAll) {
+      const words = cn.split(" ").filter((w) => w.length > 3);
+      return words.length > 0 && words.every((w) => un.indexOf(w) >= 0);
+    }
     if (un === cn || un.indexOf(cn) >= 0 || cn.indexOf(un) >= 0) return true;
     const words = cn.split(" ").filter((w) => w.length > 3);
     return words.length > 0 && words.filter((w) => un.indexOf(w) >= 0).length >= Math.ceil(words.length * 0.7);
@@ -557,7 +564,7 @@ app.post("/api/grade", async (req, res) => {
     const responseTime = Math.max(0, Math.round((Date.now() - startMs) / 1000));
     const speedMult = calcMultiplier(responseTime);
 
-    const correct = checkAnswer(guess || "", q.answer, q.aliases || []);
+    const correct = checkAnswer(guess || "", q.answer, q.aliases || [], !!q.matchAll);
     const excluded = isExcludedUser(username);
     const base = q.points;
     const speedPts = correct ? Math.min(base, Math.round(base * speedMult)) : 0;
@@ -800,7 +807,7 @@ app.post("/api/regrade/:date", async (req, res) => {
     const changed = [];
     for (const [username, sub] of Object.entries(subs)) {
       if (!sub || sub.regraded || sub.isCorrect) continue;
-      if (!checkAnswer(sub.answer || "", q.answer, q.aliases || [])) continue;
+      if (!checkAnswer(sub.answer || "", q.answer, q.aliases || [], !!q.matchAll)) continue;
       const excluded = isExcludedUser(username);
       const speedMult = calcMultiplier(sub.responseTime || 0);
       const pts = excluded ? 0 : Math.min(q.points, Math.round(q.points * speedMult));
