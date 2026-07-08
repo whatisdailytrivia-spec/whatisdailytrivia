@@ -1481,8 +1481,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const goldLink = { color: GOLD, textDecoration: "none", fontWeight: 600, cursor: "pointer" };
         return (
           <div style={{ ...s.card, padding: "16px 18px", margin: "4px 0 18px" }}>
-            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>How to Play (and help us grow!)</div>
-            <div style={{ ...rowSub, margin: "6px 0 4px" }}>One question every morning at <b>6 AM ET</b> — answer before your local midnight.</div>
+            <div style={{ ...s.mono, fontSize: "1.05rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 4 }}>How to Play (and help us grow!)</div>
             <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
               <div style={tile}>@</div>
               <div>
