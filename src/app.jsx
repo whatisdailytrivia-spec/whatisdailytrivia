@@ -913,33 +913,6 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [refCopied, setRefCopied] = useState(false);
   const [refOpen, setRefOpen] = useState(false);
   const [refQR, setRefQR] = useState(false);
-  const [calAdded, setCalAdded] = useState(false);
-  const addReminder = () => {
-    const d = new Date(Date.now() + 86400000);
-    const ds = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
-    const stamp = new Date().toISOString().replace(/[-:]/g, "").replace(/\.\d+Z$/, "Z");
-    const ics = [
-      "BEGIN:VCALENDAR", "VERSION:2.0", "PRODID:-//WhatIs Daily Trivia//EN", "CALSCALE:GREGORIAN",
-      "BEGIN:VTIMEZONE", "TZID:America/New_York",
-      "BEGIN:DAYLIGHT", "TZOFFSETFROM:-0500", "TZOFFSETTO:-0400", "TZNAME:EDT", "DTSTART:19700308T020000", "RRULE:FREQ=YEARLY;BYMONTH=3;BYDAY=2SU", "END:DAYLIGHT",
-      "BEGIN:STANDARD", "TZOFFSETFROM:-0400", "TZOFFSETTO:-0500", "TZNAME:EST", "DTSTART:19701101T020000", "RRULE:FREQ=YEARLY;BYMONTH=11;BYDAY=1SU", "END:STANDARD",
-      "END:VTIMEZONE",
-      "BEGIN:VEVENT", `UID:daily-question-${ds}@whatisdailytrivia`, `DTSTAMP:${stamp}`,
-      `DTSTART;TZID=America/New_York:${ds}T060000`, "RRULE:FREQ=DAILY",
-      "SUMMARY:WhatIs... Daily Trivia - today's question is live",
-      "DESCRIPTION:Answer before your local midnight: https://whatisdailytrivia.onrender.com",
-      "URL:https://whatisdailytrivia.onrender.com", "END:VEVENT", "END:VCALENDAR",
-    ].join("\r\n");
-    try {
-      const blob = new Blob([ics], { type: "text/calendar;charset=utf-8" });
-      const url = URL.createObjectURL(blob);
-      const a = document.createElement("a");
-      a.href = url; a.download = "whatis-daily-trivia.ics";
-      document.body.appendChild(a); a.click(); document.body.removeChild(a);
-      setTimeout(() => URL.revokeObjectURL(url), 10000);
-    } catch (e) {}
-    setCalAdded(true);
-  };
   const [wrappedOpen, setWrappedOpen] = useState(false);
   const [wrappedReady, setWrappedReady] = useState(false);
   const [wrappedSeen, setWrappedSeen] = useState(() => { try { return localStorage.getItem(`whatis_wrapped_seen:${prevMonthKey()}`) === "1"; } catch (e) { return false; } });
@@ -1508,7 +1481,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const goldLink = { color: GOLD, textDecoration: "none", fontWeight: 600, cursor: "pointer" };
         return (
           <div style={{ ...s.card, padding: "16px 18px", margin: "4px 0 18px" }}>
-            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>How to Play</div>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>How to Play (and help us grow!)</div>
             <div style={{ ...rowSub, margin: "6px 0 4px" }}>One question every morning at <b>6 AM ET</b> — answer before your local midnight.</div>
             <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
               <div style={tile}>@</div>
@@ -1522,7 +1495,6 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               <div>
                 <div style={rowTitle}>Add WhatIs... to your phone</div>
                 <div style={rowSub}>iPhone: Safari → Share → <b>Add to Home Screen</b> · Android: ⋮ → <b>Add to Home Screen</b></div>
-                <div style={{ ...rowSub, marginTop: 2 }}><span onClick={addReminder} style={goldLink}>{calAdded ? "Calendar reminder added ✓" : "Or add a daily 6 AM calendar reminder →"}</span></div>
               </div>
             </div>
             <div style={row}>
