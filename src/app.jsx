@@ -1478,7 +1478,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
         const row = { display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0" };
         const rowTitle = { fontFamily: SANS, fontWeight: 600, fontSize: "0.88rem", color: OFF_WHITE, marginBottom: 3 };
         const rowSub = { fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 1.5 };
-        const goldLink = { color: GOLD, textDecoration: "none", fontWeight: 600, cursor: "pointer" };
+        const goldLink = { color: GOLD, textDecoration: "underline", textUnderlineOffset: 3, fontWeight: 600, cursor: "pointer" };
         return (
           <div style={{ ...s.card, padding: "16px 18px", margin: "4px 0 18px" }}>
             <div style={{ ...s.mono, fontSize: "1.05rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 4 }}>How to Play (and help us grow!)</div>
@@ -1493,13 +1493,13 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               <div style={tile}>?</div>
               <div>
                 <div style={rowTitle}>Add WhatIs... to your phone</div>
-                <div style={rowSub}>iPhone: Safari → Share → <b>Add to Home Screen</b> · Android: ⋮ → <b>Add to Home Screen</b></div>
+                <div style={rowSub}>Safari → <b>Share</b> → <b>Add to Home Screen</b></div>
               </div>
             </div>
             <div style={row}>
               <div style={tile}>+</div>
               <div>
-                <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start a group</span><span style={{ color: TEXT_MUTED, fontWeight: 400 }}> · </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>Refer a friend</span></div>
+                <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start a group</span><span style={{ color: OFF_WHITE }}> and </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>refer your friends</span></div>
                 <div style={rowSub}>Private leaderboards for friends, family &amp; colleagues.</div>
               </div>
             </div>
