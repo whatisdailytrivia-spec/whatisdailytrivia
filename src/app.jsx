@@ -1490,17 +1490,22 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
               </div>
             </div>
             <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
-              <div style={tile}>?</div>
-              <div>
-                <div style={rowTitle}>Add WhatIs... to your phone</div>
-                <div style={rowSub}>Safari → <b>Share</b> → <b>Add to Home Screen</b></div>
-              </div>
-            </div>
-            <div style={row}>
               <div style={tile}>+</div>
               <div>
                 <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start a group</span><span style={{ color: OFF_WHITE }}> and </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>refer your friends</span></div>
                 <div style={rowSub}>Private leaderboards for friends, family &amp; colleagues.</div>
+              </div>
+            </div>
+            <div style={row}>
+              <div style={tile}>?</div>
+              <div>
+                <div style={rowTitle}>Add WhatIs... to your phone's homescreen</div>
+                <div style={rowSub}>
+                  1. Open this site in <b>Safari</b><br />
+                  2. Tap the <b>Share</b> button (the square with the up arrow)<br />
+                  3. Scroll down, tap <b>Add to Home Screen</b>, then <b>Add</b><br />
+                  The gold "?" lands on your home screen — one tap to tomorrow's question.
+                </div>
               </div>
             </div>
             {refOpen && (
