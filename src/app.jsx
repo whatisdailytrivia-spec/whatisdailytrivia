@@ -677,7 +677,7 @@ export default function App() {
           // else falls back to the sign-in / create-account screen.
           const shownTab = (!user && tab !== "leaderboard") ? "play" : tab;
           return <>
-        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} setLeaderboard={setLeaderboard} saveLBEntry={saveLBEntry} />}
+        {shownTab === "play"        && <PlayTab user={user} setUser={setUser} users={users} setUsers={setUsers} saveUser={saveUser} registerUser={registerUser} question={question} submissions={submissions} setSubmissions={setSubmissions} leaderboard={leaderboard} setLeaderboard={setLeaderboard} saveLBEntry={saveLBEntry} onGoGroups={() => goTab("groups")} />}
         {shownTab === "leaderboard" && <LeaderboardTab leaderboard={leaderboard} user={user} submissions={submissions} onGoGroups={() => goTab(user ? "groups" : "play")} />}
         {shownTab === "winners"     && <WinnersTab />}
         {shownTab === "groups"      && <GroupsTab user={user} setUser={setUser} saveUser={saveUser} users={users} submissions={submissions} leaderboard={leaderboard} />}
@@ -848,7 +848,7 @@ function WrappedOverlay({ user, onClose }) {
   );
 }
 
-function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry }) {
+function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, question, submissions, setSubmissions, leaderboard, setLeaderboard, saveLBEntry, onGoGroups }) {
   const [authMode, setAuthMode] = useState("login");
   const [form, setForm] = useState({ fullName: "", username: "", email: "", password: "", state: "" });
   const [nameInput, setNameInput] = useState("");          // returning-user "add your name" prompt
@@ -914,10 +914,6 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [refOpen, setRefOpen] = useState(false);
   const [refQR, setRefQR] = useState(false);
   const [calAdded, setCalAdded] = useState(false);
-  const [reminderDone] = useState(() => { try { return localStorage.getItem("whatis_reminder_done") === "1"; } catch (e) { return false; } });
-  const markReminderDone = () => { try { localStorage.setItem("whatis_reminder_done", "1"); } catch (e) {} };
-  const [homeTipDone, setHomeTipDone] = useState(() => { try { return localStorage.getItem("whatis_hometip_done") === "1"; } catch (e) { return false; } });
-  const dismissHomeTip = () => { setHomeTipDone(true); try { localStorage.setItem("whatis_hometip_done", "1"); } catch (e) {} };
   const addReminder = () => {
     const d = new Date(Date.now() + 86400000);
     const ds = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
@@ -942,7 +938,7 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
       document.body.appendChild(a); a.click(); document.body.removeChild(a);
       setTimeout(() => URL.revokeObjectURL(url), 10000);
     } catch (e) {}
-    setCalAdded(true); markReminderDone();
+    setCalAdded(true);
   };
   const [wrappedOpen, setWrappedOpen] = useState(false);
   const [wrappedReady, setWrappedReady] = useState(false);
@@ -1494,50 +1490,50 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                   <div style={{ fontSize: "0.95rem", color: TEXT_SEC, lineHeight: 1.5, whiteSpace: "pre-line" }}>{sub?.funFact || revealFact}</div>
                 </div>
               )}
-              {reminderDone ? (
-                <div style={{ marginTop: 12, textAlign: "center" }}>
-                  <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" style={{ color: GOLD, textDecoration: "none", fontFamily: SANS, fontWeight: 600, fontSize: "0.84rem" }}>Follow @whatis_dailytrivia → daily story reminders, weekly recaps &amp; monthly winners</a>
-                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED, marginTop: 6 }}>Next question at 6 AM ET · <span onClick={addReminder} style={{ color: TEXT_SEC, cursor: "pointer", textDecoration: "underline" }}>{calAdded ? "Reminder added ✓" : "Add Daily Calendar Reminder"}</span></div>
-                </div>
-              ) : (
-                <div style={{ marginTop: 14, padding: "14px 16px", background: "#111013", border: `1px solid ${GOLD}`, borderRadius: 10 }}>
-                  <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em", marginBottom: 6 }}>That's it until tomorrow</div>
-                  <div style={{ fontSize: "0.85rem", color: TEXT_SEC, lineHeight: 1.55, marginBottom: 12 }}>Next question at 6 AM ET. We can't send push notifications — follow our Instagram for daily story reminders, weekly recaps, and monthly winners.</div>
-                  <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" onClick={markReminderDone} style={{ display: "block", textAlign: "center", padding: "12px", borderRadius: 8, background: GOLD, color: BLACK, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", textDecoration: "none" }}>Follow @whatis_dailytrivia</a>
-                  <button onClick={addReminder} style={{ display: "block", width: "100%", marginTop: 8, padding: "12px", borderRadius: 8, background: SURFACE2, color: calAdded ? GOLD : OFF_WHITE, border: `1px solid ${calAdded ? GOLD : SURFACE3}`, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}>{calAdded ? "Reminder added ✓" : "Add a 6 AM reminder to my calendar"}</button>
-                  <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 8, textAlign: "center" }}>a daily repeating reminder — nothing to install</div>
-                </div>
-              )}
-              {!homeTipDone && (
-                <div style={{ marginTop: 12, padding: "14px 16px", background: "#111013", border: `1px solid ${SURFACE3}`, borderRadius: 10, position: "relative" }}>
-                  <button onClick={dismissHomeTip} aria-label="Dismiss tip" style={{ position: "absolute", top: 8, right: 10, background: "none", border: "none", color: TEXT_MUTED, fontSize: "1rem", cursor: "pointer", fontFamily: SANS, lineHeight: 1 }}>✕</button>
-                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
-                    <div style={{ width: 34, height: 34, borderRadius: 8, background: BLACK, border: `1px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SERIF, fontWeight: 700, color: GOLD, fontSize: "1.05rem", flexShrink: 0 }}>?</div>
-                    <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>Pro move</div>
-                  </div>
-                  <div style={{ fontSize: "0.85rem", color: TEXT_SEC, lineHeight: 1.55, marginBottom: 10 }}>Put WhatIs... on your home screen — a gold "?" one tap from tomorrow's question. No app store needed.</div>
-                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_SEC, lineHeight: 1.7 }}>
-                    iPhone: Safari → <b>Share</b> → <b>Add to Home Screen</b><br />Android: Chrome → <b>⋮ menu</b> → <b>Add to Home Screen</b>
-                  </div>
-                </div>
-              )}
+              <div style={{ marginTop: 12, textAlign: "center", ...s.mono, fontSize: "0.7rem", color: TEXT_MUTED }}>Next question at 6 AM ET</div>
             </div>
           );
         })()}
       </div>
 
-      {/* ── Refer a Friend (collapsible, above Top 5) ───── */}
+      {/* ── How to Play (uniform: IG · home screen · groups/refer), above Top 5 ───── */}
       {user && (() => {
         const refLink = `${window.location.origin}/?ref=${encodeURIComponent(user.username)}`;
         const refMsg = `Join us on WhatIs... Daily Trivia -\n\nOne Question.\nEvery Morning.\nMonthly Prizes.\n\n${refLink}`;
         const shareBtn = { flex: 1, display: "flex", alignItems: "center", justifyContent: "center", padding: "11px 8px", borderRadius: 8, border: `1px solid ${SURFACE3}`, background: SURFACE2, color: OFF_WHITE, fontFamily: SANS, fontWeight: 600, fontSize: "0.82rem", cursor: "pointer", textDecoration: "none", boxSizing: "border-box", whiteSpace: "nowrap" };
+        const tile = { width: 34, height: 34, borderRadius: 8, background: BLACK, border: `1px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SERIF, fontWeight: 700, color: GOLD, fontSize: "1.05rem", flexShrink: 0 };
+        const row = { display: "flex", alignItems: "flex-start", gap: 12, padding: "12px 0" };
+        const rowTitle = { fontFamily: SANS, fontWeight: 600, fontSize: "0.88rem", color: OFF_WHITE, marginBottom: 3 };
+        const rowSub = { fontSize: "0.78rem", color: TEXT_SEC, lineHeight: 1.5 };
+        const goldLink = { color: GOLD, textDecoration: "none", fontWeight: 600, cursor: "pointer" };
         return (
-          <div style={{ margin: "4px 0 18px" }}>
-            <button onClick={() => setRefOpen(o => !o)} style={{ width: "100%", background: BLACK, color: OFF_WHITE, border: `1px solid ${GOLD}`, borderRadius: 10, padding: "13px 18px", fontFamily: SANS, fontWeight: 600, fontSize: "0.95rem", cursor: "pointer" }}>
-              Refer a Friend
-            </button>
+          <div style={{ ...s.card, padding: "16px 18px", margin: "4px 0 18px" }}>
+            <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>How to Play</div>
+            <div style={{ ...rowSub, margin: "6px 0 4px" }}>One question every morning at <b>6 AM ET</b> — answer before your local midnight.</div>
+            <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
+              <div style={tile}>@</div>
+              <div>
+                <div style={rowTitle}><a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" style={goldLink}>Follow @whatis_dailytrivia →</a></div>
+                <div style={rowSub}>Daily story reminders, weekly recaps &amp; monthly winners.</div>
+              </div>
+            </div>
+            <div style={{ ...row, borderBottom: `1px solid ${SURFACE3}` }}>
+              <div style={tile}>?</div>
+              <div>
+                <div style={rowTitle}>Add WhatIs... to your phone</div>
+                <div style={rowSub}>iPhone: Safari → Share → <b>Add to Home Screen</b> · Android: ⋮ → <b>Add to Home Screen</b></div>
+                <div style={{ ...rowSub, marginTop: 2 }}><span onClick={addReminder} style={goldLink}>{calAdded ? "Calendar reminder added ✓" : "Or add a daily 6 AM calendar reminder →"}</span></div>
+              </div>
+            </div>
+            <div style={row}>
+              <div style={tile}>+</div>
+              <div>
+                <div style={rowTitle}><span onClick={onGoGroups} style={goldLink}>Start a group</span><span style={{ color: TEXT_MUTED, fontWeight: 400 }}> · </span><span onClick={() => setRefOpen(o => !o)} style={goldLink}>Refer a friend</span></div>
+                <div style={rowSub}>Private leaderboards for friends, family &amp; colleagues.</div>
+              </div>
+            </div>
             {refOpen && (
-              <div style={{ ...s.card, padding: "16px 18px", marginTop: 8 }}>
+              <div style={{ marginTop: 4, paddingTop: 12, borderTop: `1px solid ${SURFACE3}` }}>
                 <div style={{ color: TEXT_SEC, fontSize: "0.82rem", lineHeight: 1.5, marginBottom: 12 }}>
                   Share your link — add your friends to the Global leaderboard.
                 </div>
