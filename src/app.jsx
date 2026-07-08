@@ -916,6 +916,8 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
   const [calAdded, setCalAdded] = useState(false);
   const [reminderDone] = useState(() => { try { return localStorage.getItem("whatis_reminder_done") === "1"; } catch (e) { return false; } });
   const markReminderDone = () => { try { localStorage.setItem("whatis_reminder_done", "1"); } catch (e) {} };
+  const [homeTipDone, setHomeTipDone] = useState(() => { try { return localStorage.getItem("whatis_hometip_done") === "1"; } catch (e) { return false; } });
+  const dismissHomeTip = () => { setHomeTipDone(true); try { localStorage.setItem("whatis_hometip_done", "1"); } catch (e) {} };
   const addReminder = () => {
     const d = new Date(Date.now() + 86400000);
     const ds = `${d.getFullYear()}${String(d.getMonth() + 1).padStart(2, "0")}${String(d.getDate()).padStart(2, "0")}`;
@@ -1504,6 +1506,19 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
                   <a href="https://www.instagram.com/whatis_dailytrivia" target="_blank" rel="noopener noreferrer" onClick={markReminderDone} style={{ display: "block", textAlign: "center", padding: "12px", borderRadius: 8, background: GOLD, color: BLACK, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", textDecoration: "none" }}>Follow @whatis_dailytrivia</a>
                   <button onClick={addReminder} style={{ display: "block", width: "100%", marginTop: 8, padding: "12px", borderRadius: 8, background: SURFACE2, color: calAdded ? GOLD : OFF_WHITE, border: `1px solid ${calAdded ? GOLD : SURFACE3}`, fontFamily: SANS, fontWeight: 600, fontSize: "0.9rem", cursor: "pointer" }}>{calAdded ? "Reminder added ✓" : "Add a 6 AM reminder to my calendar"}</button>
                   <div style={{ ...s.mono, fontSize: "0.62rem", color: TEXT_MUTED, marginTop: 8, textAlign: "center" }}>a daily repeating reminder — nothing to install</div>
+                </div>
+              )}
+              {!homeTipDone && (
+                <div style={{ marginTop: 12, padding: "14px 16px", background: "#111013", border: `1px solid ${SURFACE3}`, borderRadius: 10, position: "relative" }}>
+                  <button onClick={dismissHomeTip} aria-label="Dismiss tip" style={{ position: "absolute", top: 8, right: 10, background: "none", border: "none", color: TEXT_MUTED, fontSize: "1rem", cursor: "pointer", fontFamily: SANS, lineHeight: 1 }}>✕</button>
+                  <div style={{ display: "flex", alignItems: "center", gap: 10, marginBottom: 8 }}>
+                    <div style={{ width: 34, height: 34, borderRadius: 8, background: BLACK, border: `1px solid ${GOLD}`, display: "flex", alignItems: "center", justifyContent: "center", fontFamily: SERIF, fontWeight: 700, color: GOLD, fontSize: "1.05rem", flexShrink: 0 }}>?</div>
+                    <div style={{ ...s.mono, fontSize: "0.62rem", color: GOLD, textTransform: "uppercase", letterSpacing: "0.14em" }}>Pro move</div>
+                  </div>
+                  <div style={{ fontSize: "0.85rem", color: TEXT_SEC, lineHeight: 1.55, marginBottom: 10 }}>Put WhatIs... on your home screen — a gold "?" one tap from tomorrow's question. No app store needed.</div>
+                  <div style={{ ...s.mono, fontSize: "0.7rem", color: TEXT_SEC, lineHeight: 1.7 }}>
+                    iPhone: Safari → <b>Share</b> → <b>Add to Home Screen</b><br />Android: Chrome → <b>⋮ menu</b> → <b>Add to Home Screen</b>
+                  </div>
                 </div>
               )}
             </div>
