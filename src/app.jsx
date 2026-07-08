@@ -1499,11 +1499,11 @@ function PlayTab({ user, setUser, users, setUsers, saveUser, registerUser, quest
             <div style={row}>
               <div style={tile}>?</div>
               <div>
-                <div style={rowTitle}>Add WhatIs... to your phone's homescreen</div>
+                <div style={rowTitle}>Add WhatIs... to your phone's homescreen as a Web App</div>
                 <div style={rowSub}>
                   1. Open this site in <b>Safari</b> <span style={{ color: TEXT_MUTED }}>(from Instagram: tap <b>⋯</b> top-right → <b>Open in external browser</b>)</span><br />
                   2. Tap the <b>Share</b> button (the square with the up arrow)<br />
-                  3. Scroll down, tap <b>Add to Home Screen</b>, then <b>Add</b>
+                  3. Scroll down, tap <b>Add to Home Screen</b>
                 </div>
               </div>
             </div>
